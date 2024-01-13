@@ -7,6 +7,8 @@
 #define debug(x) printf("%s:%d\n", #x, x)
 #define debug_s(x) printf("%s:%s\n", #x, x)
 
+#define alias_path "/Users/erfan/Codes/zrb/alias_ha.txt"
+
 char *get_parent_folder(char *path);
 char *get_repo_path();
 
@@ -65,9 +67,17 @@ int main(int argc, char **argv)
     // else
     //     debug_s(repo_path);
 
-    char *c = func();
-    free(c);
-    printf("%s\n", c);
+    FILE *fp = fopen("alias_ha.txt", "r");
+    if (fp == NULL)
+    {
+        return 0;
+    }
+    char key[100], val[100], arr[100];
+    fgets(arr, sizeof(arr), fp);
+    debug_s(arr);
+    sscanf(arr, "%s : %s", key, val);
+    debug_s(key);
+    debug_s(val);
 }
 
 void joint(char *str1, char *str2)

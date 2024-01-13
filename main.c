@@ -7,7 +7,7 @@
 
 #define debug(x) printf("%s:%d\n", #x, x)
 #define debug_s(x) printf("%s:%s\n", #x, x)
-#define alias_path "/Users/erfan/Codes/zrb/aliac_ha.txt"
+#define alias_path "/Users/erfan/Codes/zrb/alias_ha.txt"
 
 typedef int (*func_ptr)(char **);
 
@@ -38,9 +38,10 @@ int main(int argc, char **argv)
     if (!command_func)
     {
         fprintf(stderr, "there is no command named: \"%s\".\nyou may need some help.\n", argv[1]);
+        return 0;
     }
 
-    int status = command_func(argv[1]);
+    int status = command_func(&argv[1]);
     return 0;
 }
 
@@ -53,10 +54,10 @@ char *search_alias(char *command)
         return NULL;
     }
 
-    char *str, *key, *val;
+    char str[300], key[100], val[100];
     while (fgets(str, sizeof(str), alias) != NULL)
     {
-        sscanf(str, "\"%s\":\"%s\"", key, val);
+        sscanf(str, "%s : %s", key, val);
         if (!strcmp(key, command))
         {
             printf("found: %s -> %s\n", key, val);
@@ -72,7 +73,7 @@ func_ptr input_finder(char *command)
     // looking for command in valid commands and then return a sutable function
     if (command == NULL)
     {
-        fprintf(stderr, "Command is null.\n");
+        fprintf(stderr, "[ERR] Command is null.\n");
         return NULL;
     }
 
@@ -85,6 +86,13 @@ func_ptr input_finder(char *command)
     {
         // looking in alias commands
         char *alias_key = search_alias(command);
+
+        if (!alias_key)
+        {
+            free(alias_key);
+            return NULL;
+        }
+
         strcpy(command, alias_key);
         free(alias_key);
         return input_finder(command);
@@ -121,6 +129,7 @@ int create_repo(char **argv)
     //     printf("[ERR] can not build a config file\n");
     //     return 0;
     // }
+    return 0;
 }
 
 char *get_parent_folder(char *path)
