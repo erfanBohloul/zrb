@@ -1,0 +1,2 @@
+user.name = admin
+user.email = admin@example.com

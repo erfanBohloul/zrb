@@ -67,17 +67,10 @@ int main(int argc, char **argv)
     // else
     //     debug_s(repo_path);
 
-    FILE *fp = fopen("alias_ha.txt", "r");
-    if (fp == NULL)
-    {
-        return 0;
-    }
-    char key[100], val[100], arr[100];
-    fgets(arr, sizeof(arr), fp);
-    debug_s(arr);
-    sscanf(arr, "%s : %s", key, val);
-    debug_s(key);
-    debug_s(val);
+    FILE *file = fopen("alias_ha.txt", "r");
+    char str[1000];
+    if (fgets(str, sizeof str, file) == NULL)
+        printf("tmp:\n");
 }
 
 void joint(char *str1, char *str2)
