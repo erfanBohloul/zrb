@@ -9,18 +9,18 @@
 #define debug_s(x) printf("%s:%s\n", #x, x)
 #define alias_path "/Users/erfan/Codes/zrb/alias_ha.txt"
 
-typedef int (*func_ptr)(char **);
+typedef int (*func_ptr)(int, char **);
 
 // input:
-func_ptr input_finder(char **command);
+func_ptr input_finder(int argc, char **argv);
 
 // repo:
 char *get_repo_path();
-int create_repo(char **argv);
+int create_repo(int argc, char **argv);
 
 // alias
 char *search_alias(char *command);
-char **handle_alias(int *argc, char **argv);
+char **handle_alias(int *argc, char **command);
 
 // general:
 char *get_parent_folder(char *path);
@@ -41,7 +41,6 @@ int main(int argc, char **argv)
     }
 
     argv = handle_alias(&argc, argv);
-    debug(argc);
     for (int i = 1; i < argc; i++)
     {
         printf("%s ", argv[i]);
@@ -49,14 +48,14 @@ int main(int argc, char **argv)
     printf("\n");
     return 0;
 
-    func_ptr command_func = input_finder(argv[1]);
+    func_ptr command_func = input_finder(argc, &argv[1]);
     if (!command_func)
     {
         fprintf(stderr, "there is no command named: \"%s\".\nyou may need some help.\n", argv[1]);
         return 0;
     }
 
-    int status = command_func(&argv[1]);
+    int status = command_func(argc, &argv[1]);
     return 0;
 }
 
@@ -74,6 +73,7 @@ int change_config(char **argv)
 
 int count_word(char *str)
 {
+
     int count = 0;
     while (*str == ' ')
         ++str;
@@ -88,7 +88,6 @@ int count_word(char *str)
         {
             count++;
         }
-
         last_char = *str;
         ++str;
     }
@@ -112,23 +111,27 @@ char *search_alias(char *command)
         fprintf(stderr, "[ERR] can not open alias file.\n");
         return NULL;
     }
+    if (command == NULL)
+        return NULL;
 
     char str[1000], key[100], *val;
-    // debug_s(command);
     // char *tmp = fgets(str, sizeof(str), alias);
     // printf("tmp:%s\n", tmp);
     while (fgets(str, sizeof(str), alias))
     {
-        debug_s(key);
-        sscanf(str, "%s", key);
 
+        sscanf(str, "%s", key);
         if (!strcmp(key, command))
         {
 
             // get val
             val = strstr(str, ":") + 2;
 
+            if (val[strlen(val) - 1] == '\n')
+                val[strlen(val) - 1] = '\0';
+
             printf("found: %s -> %s\n", key, val);
+
             return strdup(val);
         }
     }
@@ -148,16 +151,13 @@ char **handle_alias(int *argc, char **command)
     // try every word and replace it with alias one
     for (int i = 1; i < *argc; i++)
     {
+        if (!argv[i])
+            continue;
+
         char *val = search_alias(argv[i]);
 
         // there is no value for key
         if (!val)
-            continue;
-
-        if (val[strlen(val) - 1] == '\n')
-            val[strlen(val) - 1] = '\0';
-
-        if (val == NULL)
             continue;
 
         int count = count_word(val);
@@ -168,7 +168,10 @@ char **handle_alias(int *argc, char **command)
         // shift the rest of the word to right:
         for (int j = *argc - 1; j > i; j--)
         {
-            char *tmp;
+            if (argv[j] == NULL)
+                continue;
+
+            char tmp[100];
             strcpy(tmp, argv[j]);
             argv[j + count - 1] = strdup(tmp);
         }
@@ -185,16 +188,10 @@ char **handle_alias(int *argc, char **command)
         }
         i--;
     }
-
-    // for (int i = 0; i < *argc; i++)
-    // {
-    //     printf("%s ", argv[i]);
-    // }
-    // printf("\n");
     return argv;
 }
 
-func_ptr input_finder(char **argv)
+func_ptr input_finder(int argc, char **argv)
 {
     char *command = argv[0];
     // looking for command in valid commands and then return a sutable function
@@ -209,27 +206,13 @@ func_ptr input_finder(char **argv)
         return &create_repo;
     }
 
-    else
-    {
-        // looking in alias commands
-        char *alias_key = search_alias(command);
+    // else:
+    Invalid_Command();
 
-        if (!alias_key)
-        {
-            free(alias_key);
-            return NULL;
-        }
-
-        strcpy(command, alias_key);
-        free(alias_key);
-        return input_finder(command);
-    }
-
-    Undefined_Behaviour();
     return NULL;
 }
 
-int create_repo(char **argv)
+int create_repo(int argc, char **argv)
 {
     if (get_repo_path() != NULL)
     {
