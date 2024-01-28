@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <libgen.h>
 #include <sys/stat.h>
 
 #define debug(x) printf("%s:%d\n", #x, x)
@@ -23,12 +24,16 @@ int create_repo(int argc, char **argv);
 char *search_alias(char *command);
 char **handle_alias(int *argc, char **command);
 
+// stage
+int add_to_stage(int argc, char **argv);
+
 // general:
 char *get_parent_folder(char *path);
 int count_word(char *str);
 int is_file_empty(FILE *file);
 char *get_local_config_path();
 void copy_file(FILE *src, FILE *dest);
+void write_to_file(FILE *file, char *str);
 
 // errors:
 void Undefined_Behaviour();
@@ -63,6 +68,37 @@ int main(int argc, char **argv)
 
     int status = command_func(argc - 1, &argv[1]);
     return 0;
+}
+
+func_ptr input_finder(int argc, char **argv)
+{
+    char *command = argv[0];
+    // looking for command in valid commands and then return a sutable function
+    if (command == NULL)
+    {
+        fprintf(stderr, "[ERROR] Command is null.\n");
+        return NULL;
+    }
+
+    if (!strcmp(command, "init"))
+    {
+        return &create_repo;
+    }
+
+    if (!strcmp(command, "config"))
+    {
+        return &change_config;
+    }
+
+    if (!strcmp(command, "add"))
+    {
+        return &add_to_stage;
+    }
+
+    // else:
+    Invalid_Command();
+
+    return NULL;
 }
 
 int count_word(char *str)
@@ -185,30 +221,95 @@ char **handle_alias(int *argc, char **command)
     return argv;
 }
 
-func_ptr input_finder(int argc, char **argv)
+int from_helper_to_stage()
 {
-    char *command = argv[0];
-    // looking for command in valid commands and then return a sutable function
-    if (command == NULL)
+    char *repo_path = get_repo_path();
+    char path[1000];
+
+    sprintf(path, "%s/helper.txt", repo_path);
+    FILE *helper = fopen(path, "r");
+
+    sprintf(path, "%s/log.txt", repo_path);
+    FILE *log = fopen(path, "r");
+
+    if (helper == NULL)
     {
-        fprintf(stderr, "[ERROR] Command is null.\n");
-        return NULL;
+        perror("[ERROR] can not open helper file");
+        return -1;
     }
 
-    if (!strcmp(command, "init"))
+    if (log == NULL)
     {
-        return &create_repo;
+        perror("[ERROR] can not open log file");
+        return -1;
     }
 
-    if (!strcmp(command, "config"))
+    int all = 0, succ = 0;
+    char str[1000], command[1000], *tmp;
+    while (fgets(str, sizeof str, helper))
     {
-        return &change_config;
+        all++;
+        if (tmp[strlen(tmp) - 1] == '\n')
+            tmp[strlen(tmp) - 1] = '\0';
+
+        if (str[0] == '.')
+        {
+            // remove ./ from command:
+            tmp = str;
+            for (; *tmp != '/'; tmp++)
+                ;
+            ++tmp;
+            debug_s(tmp);
+        }
+
+        if (strnstr(tmp, ".zrb/", 6))
+        {
+            continue;
+        }
+
+        printf("add to stage:%s\n", tmp);
+        sprintf(command, "cp -r %s %s/stage/%s", tmp, repo_path, str);
+        int status = system(command);
+        if (status == -1)
+        {
+            perror("[ERROR] Failed to execute the command.");
+            continue;
+        }
+
+        succ++;
     }
 
-    // else:
-    Invalid_Command();
+    fclose(helper);
+    fclose(log);
+    printf("%d item successfully added to stage from %d item\n", succ, all);
+    return 0;
+}
 
-    return NULL;
+int add_to_stage(int argc, char **argv)
+{
+    // zrb add ..
+    int idx = 1;
+    if (!strcmp(argv[1], "-f"))
+    {
+        idx++;
+    }
+
+    char *repo_path = get_repo_path();
+    char command[1000];
+    for (int i = idx; i < argc; i++)
+    {
+        sprintf(command, "find %s > %s/helper.txt", argv[i], repo_path);
+        int status = system(command);
+
+        if (status == -1)
+        {
+            perror("[ERROR] system find add");
+        }
+
+        from_helper_to_stage();
+    }
+
+    return 0;
 }
 
 int change_config_file(FILE *conf_file, int argc, char **argv, int idx)
@@ -311,24 +412,6 @@ void copy_file(FILE *src, FILE *dest)
     }
 }
 
-// int newCommit()
-// {
-//     // create a helper FILE
-//     FILE *tmp_w = fopen("./.zrb/help", "w");
-//     if (!tmp_w)
-//     {
-//         perror("fopen tmp_w");
-//         return -1;
-//     }
-
-//     FILE *tmp_r = fopen("./.zrb/help", "r");
-//     if (!tmp_r)
-//     {
-//         perror("fopen tmp_r");
-//         return -1;
-//     }
-// }
-
 void write_to_file(FILE *file, char *str)
 {
     // the file is in the write mode
@@ -382,6 +465,7 @@ int create_repo(int argc, char **argv)
     FILE *root_commit = fopen("./.zrb/files/root.txt", "w");
     write_to_file(root_commit, "commit root\nroot\n");
 
+    fclose(root_commit);
     printf("[SUCC] folder of file has created\n");
 
     // create stage folder:
@@ -392,6 +476,29 @@ int create_repo(int argc, char **argv)
     }
 
     printf("[SUCC] the stage has created\n");
+
+    // create a helper txt file:
+    FILE *helper = fopen("./.zrb/helper.txt", "w");
+    if (!helper)
+    {
+        perror("[ERORR] fopen helper.txt");
+        return -1;
+    }
+
+    fclose(helper);
+    printf("[SUCC] helper.txt has created\n");
+
+    // create a log txt file:
+    FILE *log = fopen("./.zrb/log.txt", "w");
+    if (!log)
+    {
+        perror("[ERORR] fopen log.txt");
+        return -1;
+    }
+
+    fclose(log);
+    printf("[SUCC] log.txt has created\n");
+
     return 0;
 }
 
