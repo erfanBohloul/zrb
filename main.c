@@ -24,8 +24,8 @@ int create_repo(int argc, char **argv);
 char *search_alias(char *command);
 char **handle_alias(int *argc, char **command);
 
-// stage
-int add_to_stage(int argc, char **argv);
+// add
+int add(int argc, char **argv);
 
 // general:
 char *get_parent_folder(char *path);
@@ -34,6 +34,7 @@ int is_file_empty(FILE *file);
 char *get_local_config_path();
 void copy_file(FILE *src, FILE *dest);
 void write_to_file(FILE *file, char *str);
+char *get_proj_path();
 
 // errors:
 void Undefined_Behaviour();
@@ -92,7 +93,7 @@ func_ptr input_finder(int argc, char **argv)
 
     if (!strcmp(command, "add"))
     {
-        return &add_to_stage;
+        return &add;
     }
 
     // else:
@@ -221,6 +222,48 @@ char **handle_alias(int *argc, char **command)
     return argv;
 }
 
+int add_file_to_stage(char *absolute_path)
+{
+    char *proj_path = get_proj_path(),
+         *repo_path = get_repo_path();
+    char *path = absolute_path + strlen(proj_path) + 1;
+    char command[1000];
+    debug_s(path);
+    debug_s(proj_path);
+
+    char word[1000];
+    int i = 0, idx = 0;
+    for (; 1; i++, idx++)
+    {
+        debug(i);
+        if (path[i] == '/')
+        {
+            word[idx] = '\0';
+            sprintf(command, "%s/stage/%s", repo_path, word);
+            debug_s(command);
+            mkdir(command, 0777);
+            word[idx] = '/';
+            continue;
+        }
+
+        word[idx] = path[i];
+
+        if (path[i] == '\0')
+            break;
+    }
+
+    sprintf(command, "cp %s %s/stage/%s", absolute_path, repo_path, path);
+    debug_s(command);
+    int status = system(command);
+    if (status == -1)
+    {
+        perror("[ERROR] Failed to execute the command.");
+        return -1;
+    }
+
+    return 0;
+}
+
 int from_helper_to_stage()
 {
     char *repo_path = get_repo_path();
@@ -249,32 +292,10 @@ int from_helper_to_stage()
     while (fgets(str, sizeof str, helper))
     {
         all++;
-        if (tmp[strlen(tmp) - 1] == '\n')
-            tmp[strlen(tmp) - 1] = '\0';
+        if (str[strlen(str) - 1] == '\n')
+            str[strlen(str) - 1] = '\0';
 
-        if (str[0] == '.')
-        {
-            // remove ./ from command:
-            tmp = str;
-            for (; *tmp != '/'; tmp++)
-                ;
-            ++tmp;
-            debug_s(tmp);
-        }
-
-        if (strnstr(tmp, ".zrb/", 6))
-        {
-            continue;
-        }
-
-        printf("add to stage:%s\n", tmp);
-        sprintf(command, "cp -r %s %s/stage/%s", tmp, repo_path, str);
-        int status = system(command);
-        if (status == -1)
-        {
-            perror("[ERROR] Failed to execute the command.");
-            continue;
-        }
+        add_file_to_stage(str);
 
         succ++;
     }
@@ -285,9 +306,56 @@ int from_helper_to_stage()
     return 0;
 }
 
-int add_to_stage(int argc, char **argv)
+int show_staged_files(int depth, int top)
 {
-    // zrb add ..
+    // depth start form 1 and increase by one every time this func call itself
+    // until depth reach the top
+
+    if (depth > top)
+        return 0;
+
+    DIR *dir;
+    struct dirent *entry;
+
+    // open the current dir:
+    dir = opendir(".");
+    if (dir == NULL)
+    {
+        perror("unable to open cur dir");
+        return -1;
+    }
+
+    // loop throw all entries in the directory
+    while ((entry = readdir(dir)) != NULL)
+    {
+        // skip . and .. and .zrb file
+        if (
+            !strcmp(entry->d_name, ".") ||
+            !strcmp(entry->d_name, "..") ||
+            !strcmp(entry->d_name, ".zrb"))
+            continue;
+
+        // for (int i = 1; i < depth; i++)
+        //     printf("\t");
+
+        // check if the entry is a dir
+        if (entry->d_type == DT_DIR)
+        {
+            // printf("")
+            // print sub-dir:
+            printf("%s/\n", entry->d_name);
+        }
+    }
+}
+
+int add(int argc, char **argv)
+{
+    // zrb add -n depth
+    if (!strcmp(argv[1], "-n"))
+    {
+    }
+
+    // zrb add < -f >
     int idx = 1;
     if (!strcmp(argv[1], "-f"))
     {
@@ -298,7 +366,7 @@ int add_to_stage(int argc, char **argv)
     char command[1000];
     for (int i = idx; i < argc; i++)
     {
-        sprintf(command, "find %s > %s/helper.txt", argv[i], repo_path);
+        sprintf(command, "find %s -type f -exec realpath {} + > %s/helper.txt", argv[i], repo_path);
         int status = system(command);
 
         if (status == -1)
@@ -522,6 +590,13 @@ char *get_parent_folder(char *path)
 
 char *get_repo_path()
 {
+    char *proj = get_proj_path();
+    strcat(proj, "/.zrb");
+    return proj;
+}
+
+char *get_proj_path()
+{
     char *path = getcwd(NULL, 0);
     DIR *folder;
     while (strlen(path))
@@ -532,10 +607,7 @@ char *get_repo_path()
         while ((entry = readdir(folder)) != NULL)
         {
             if (!strcmp(".zrb", entry->d_name))
-            {
-                strcat(path, "/.zrb");
                 return path;
-            }
         }
 
         path = get_parent_folder(path);
