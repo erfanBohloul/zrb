@@ -228,14 +228,14 @@ int add_file_to_stage(char *absolute_path)
          *repo_path = get_repo_path();
     char *path = absolute_path + strlen(proj_path) + 1;
     char command[1000];
-    debug_s(path);
-    debug_s(proj_path);
+
+    if (strnstr(path, ".zrb", 5))
+        return 0;
 
     char word[1000];
     int i = 0, idx = 0;
     for (; 1; i++, idx++)
     {
-        debug(i);
         if (path[i] == '/')
         {
             word[idx] = '\0';
