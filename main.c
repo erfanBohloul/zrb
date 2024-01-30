@@ -5,6 +5,8 @@
 #include <dirent.h>
 #include <libgen.h>
 #include <sys/stat.h>
+#include <stdarg.h>
+#include <time.h>
 
 #define debug(x) printf("%s:%d\n", #x, x)
 #define debug_s(x) printf("%s:%s\n", #x, x)
@@ -34,7 +36,9 @@ int is_file_empty(FILE *file);
 char *get_local_config_path();
 void copy_file(FILE *src, FILE *dest);
 void write_to_file(FILE *file, char *str);
-char *get_proj_path();
+char *string_format(const char *format, ...);
+char *sha_hash(char *path_file);
+void cd_proj();
 
 // errors:
 void Undefined_Behaviour();
@@ -43,6 +47,8 @@ void Not_repo();
 
 // config
 int change_config(int argc, char **argv);
+
+// commit
 
 int main(int argc, char **argv)
 {
@@ -96,10 +102,225 @@ func_ptr input_finder(int argc, char **argv)
         return &add;
     }
 
+    if (!strcmp(command, "commit"))
+    {
+        return &commit;
+    }
+
     // else:
     Invalid_Command();
 
     return NULL;
+}
+
+char *sha_hash(char *path_file)
+{
+    char *command = string_format("shasum -a 256 %s > ./.zrb/helper.txt", path_file);
+    debug_s(command);
+    system(command);
+    free(command);
+
+    FILE *helper = fopen("./.zrb/helper.txt", "r+");
+    if (helper == NULL)
+    {
+        perror("opening helper file");
+        return NULL;
+    }
+
+    char sha[1000];
+    fgets(sha, sizeof sha, helper);
+    if (sha[strlen(sha) - 1] == '\n')
+        sha[strlen(sha) - 1] = '\0';
+
+    fclose(helper);
+    return strdup(sha);
+}
+
+int add_file_to_repo_files(FILE *file, char *file_name, char *path, FILE *commit_file)
+{
+
+    // hash file with sha algo
+    char *sha = sha_hash(path);
+
+    // create a txt file to hold the content of commited file
+    FILE *hash_file = fopen(sha, "w+");
+    copy_file(file, hash_file);
+    fclose(hash_file);
+
+    char *command = string_format("%s %s\n", sha, file_name);
+    fputs(command, commit_file);
+    free(command);
+    printf("saved in commit: %s %s\n", sha, file_name);
+
+    free(sha);
+    return 0;
+}
+
+int commit_in_depth(DIR *folder, char *path, FILE *commit_file)
+{
+
+    // create a subdir commit-file
+    char *repo_folder_path = string_format("./.zrb/repo/%s.txt", path);
+    debug(repo_folder_path);
+    // create a file with a temprary name
+    FILE *sub_commit_file = fopen(repo_folder_path, "w+");
+    if (sub_commit_file == NULL)
+    {
+        perror("building sub commit folder");
+        return -1;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(folder)) != NULL)
+    {
+        // skip . and .. file
+        if (
+            !strcmp(entry->d_name, ".") ||
+            !strcmp(entry->d_name, ".."))
+            continue;
+
+        if (entry->d_type == DT_DIR)
+        {
+            char *tmp = string_format("%s/%s", path, entry->d_name);
+            int res = commit_in_depth(opendir(tmp), tmp, sub_commit_file);
+            free(tmp);
+        }
+
+        else
+        {
+            // its a file
+            char *file_path = string_format("%s/%s", path, entry->d_name);
+            FILE *file = fopen(file_path, "r+");
+            add_file_to_repo_files(file, entry->d_name, path, sub_commit_file);
+        }
+    }
+
+    // calculate the hash
+    char *sha = sha_hash(repo_folder_path);
+
+    // rename the sub name to it's hash
+    char *command = string_format("mv %s %s", repo_folder_path, sha);
+    system(command);
+    free(command);
+
+    // write the SHA in the parent directory
+    command = string_format("%s %s\n", sha, readdir(folder)->d_name);
+    fputs(command, commit_file);
+    printf("saved in commit: %s", command);
+    free(command);
+
+    free(repo_folder_path);
+    fclose(sub_commit_file);
+    return 0;
+}
+
+void cd_proj()
+{
+    char *proj_path = get_proj_path();
+    char *command = string_format("cd %s", proj_path);
+    system(command);
+
+    free(command);
+    free(proj_path);
+}
+
+char *get_author_name()
+{
+    char *proj_path = get_proj_path();
+    char *command = string_format("%s/.zrb/author.txt", proj_path);
+    FILE *conf = fopen(command, "r+");
+    if (conf == NULL)
+    {
+        perror("[ERROR] open conf file");
+    }
+
+    char author_name[1000];
+    fscanf(conf, "%*s = %s", author_name);
+    return strdup(author_name);
+}
+
+char *get_author_email()
+{
+    char *proj_path = get_proj_path();
+    char *command = string_format("%s/.zrb/author.txt", proj_path);
+    FILE *conf = fopen(command, "r+");
+    if (conf == NULL)
+    {
+        perror("[ERROR] open conf file");
+    }
+
+    // skip first line
+    fgets(NULL, 0, conf);
+
+    char author_email[1000];
+    fscanf(conf, "%*s = %s", author_email);
+    return strdup(author_email);
+}
+
+int set_conf_of_commit(FILE *commit)
+{
+    /*
+        1. commit
+        2. user.name
+        3. user.email
+        4. time
+        5. hash of last commit
+    */
+
+    // author info
+    char *username = get_author_name(),
+         *user_email = get_author_email();
+
+    // time
+    struct tm *timeinfo;
+    time_t curr;
+    time(&curr);
+    timeinfo = localtime(&curr);
+
+    // write to the file
+    /*1*/ fputs("commit\n", commit);
+    /*2*/ fputs(username, commit);
+    /*3*/ fputs(user_email, commit);
+    /*4*/ fputs(asctime(timeinfo), commit);
+}
+
+int commit(int argc, char **argv)
+{
+    /*
+    file:
+            absolute path
+            name
+            number of conterbutes
+            content
+    */
+
+    cd_proj();
+    DIR *folder = opendir(".zrb/stage/");
+
+    FILE *root = fopen("./.zrb/repo/.root.txt", "w+");
+    commit_in_depth(folder, ".", root);
+
+    // calculate the hash
+    char *sha = sha_hash("./.zrb/repo/.root.txt");
+
+    // rename the sub name to it's hash
+    char *command = string_format("mv %s %s", "./.zrb/repo/.root.txt", sha);
+    system(command);
+    free(command);
+    return 0;
+}
+
+char *string_format(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+
+    int size = vsnprintf(NULL, 0, format, args) + 1;
+    char *out = malloc(size * sizeof(char));
+    vsnprintf(out, size, format, args);
+
+    va_end(args);
+    return out;
 }
 
 int count_word(char *str)
