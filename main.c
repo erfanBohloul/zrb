@@ -35,10 +35,14 @@ int count_word(char *str);
 int is_file_empty(FILE *file);
 char *get_local_config_path();
 void copy_file(FILE *src, FILE *dest);
-void write_to_file(FILE *file, char *str);
 char *string_format(const char *format, ...);
 char *sha_hash(char *path_file);
 void cd_proj();
+char *get_proj_path();
+char *get_author_name();
+char *get_author_email();
+FILE *get_helper_file();
+char *get_helper_file_path();
 
 // errors:
 void Undefined_Behaviour();
@@ -49,6 +53,7 @@ void Not_repo();
 int change_config(int argc, char **argv);
 
 // commit
+int commit(int argc, char **argv);
 
 int main(int argc, char **argv)
 {
@@ -113,27 +118,52 @@ func_ptr input_finder(int argc, char **argv)
     return NULL;
 }
 
-char *sha_hash(char *path_file)
+FILE *get_helper_file()
 {
-    char *command = string_format("shasum -a 256 %s > ./.zrb/helper.txt", path_file);
-    debug_s(command);
-    system(command);
-    free(command);
-
-    FILE *helper = fopen("./.zrb/helper.txt", "r+");
+    char *proj_path = get_proj_path();
+    char *command = string_format("%s/.zrb/helper.txt", proj_path);
+    FILE *helper = fopen(command, "r+");
     if (helper == NULL)
     {
         perror("opening helper file");
         return NULL;
     }
 
+    free(proj_path);
+    free(command);
+    return helper;
+}
+
+char *get_helper_file_path()
+{
+    char *proj_path = get_proj_path();
+    char *command = string_format("%s/.zrb/helper.txt", proj_path);
+    free(proj_path);
+    return command;
+}
+
+char *sha_hash(char *path_file)
+{
+    char *helper_path = get_helper_file_path();
+    char *command = string_format("shasum -a 256 %s > %s", path_file, helper_path);
+    debug_s(command);
+    system(command);
+    free(command);
+
+    FILE *helper = get_helper_file();
+    if (helper == NULL)
+    {
+        return NULL;
+    }
+
     char sha[1000];
     fgets(sha, sizeof sha, helper);
-    if (sha[strlen(sha) - 1] == '\n')
-        sha[strlen(sha) - 1] = '\0';
+    char *hash = strtok(sha, " ");
+    if (hash[strlen(hash) - 1] == '\n')
+        hash[strlen(hash) - 1] = '\0';
 
     fclose(helper);
-    return strdup(sha);
+    return strdup(hash);
 }
 
 int add_file_to_repo_files(FILE *file, char *file_name, char *path, FILE *commit_file)
@@ -141,6 +171,10 @@ int add_file_to_repo_files(FILE *file, char *file_name, char *path, FILE *commit
 
     // hash file with sha algo
     char *sha = sha_hash(path);
+    if (sha == NULL)
+    {
+        return -1;
+    }
 
     // create a txt file to hold the content of commited file
     FILE *hash_file = fopen(sha, "w+");
@@ -156,12 +190,17 @@ int add_file_to_repo_files(FILE *file, char *file_name, char *path, FILE *commit
     return 0;
 }
 
-int commit_in_depth(DIR *folder, char *path, FILE *commit_file)
+int commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *commit_file)
 {
+    if (folder == NULL)
+    {
+        perror("[ERROR] can not going depth with null folder");
+        return -1;
+    }
 
     // create a subdir commit-file
-    char *repo_folder_path = string_format("./.zrb/repo/%s.txt", path);
-    debug(repo_folder_path);
+    char *repo_folder_path = string_format("%s.txt", repo_path);
+    debug_s(repo_folder_path);
     // create a file with a temprary name
     FILE *sub_commit_file = fopen(repo_folder_path, "w+");
     if (sub_commit_file == NULL)
@@ -173,55 +212,58 @@ int commit_in_depth(DIR *folder, char *path, FILE *commit_file)
     struct dirent *entry;
     while ((entry = readdir(folder)) != NULL)
     {
+
         // skip . and .. file
         if (
             !strcmp(entry->d_name, ".") ||
             !strcmp(entry->d_name, ".."))
             continue;
 
+        debug_s(entry->d_name);
+
         if (entry->d_type == DT_DIR)
         {
-            char *tmp = string_format("%s/%s", path, entry->d_name);
-            int res = commit_in_depth(opendir(tmp), tmp, sub_commit_file);
-            free(tmp);
+            char *sub_stage_path = string_format("%s/%s", stage_path, entry->d_name);
+            debug_s(sub_stage_path);
+            char *sub_repo_path = string_format("%s-%s", repo_path, entry->d_name);
+            debug_s(sub_repo_path);
+            int res = commit_in_depth(opendir(sub_stage_path), sub_stage_path, sub_repo_path, sub_commit_file);
+            if (res == -1)
+                return -1;
+
+            free(sub_repo_path);
         }
 
         else
         {
             // its a file
-            char *file_path = string_format("%s/%s", path, entry->d_name);
-            FILE *file = fopen(file_path, "r+");
-            add_file_to_repo_files(file, entry->d_name, path, sub_commit_file);
+            char *file_path = string_format("%s-%s", repo_path, entry->d_name);
+            FILE *file = fopen(file_path, "w+");
+            add_file_to_repo_files(file, entry->d_name, file_path, sub_commit_file);
         }
     }
 
     // calculate the hash
     char *sha = sha_hash(repo_folder_path);
-
+    char *sha_file = string_format("%s.txt", sha);
     // rename the sub name to it's hash
-    char *command = string_format("mv %s %s", repo_folder_path, sha);
+    char *command = string_format("mv %s %s", repo_folder_path, sha_file);
+    debug_s(command);
     system(command);
-    free(command);
 
+    free(command);
+    free(sha_file);
     // write the SHA in the parent directory
-    command = string_format("%s %s\n", sha, readdir(folder)->d_name);
+    command = string_format("%s %s\n", sha_file, readdir(folder)->d_name);
+    printf("[SUCC] dfg\n");
     fputs(command, commit_file);
     printf("saved in commit: %s", command);
     free(command);
 
     free(repo_folder_path);
     fclose(sub_commit_file);
+    free(sha);
     return 0;
-}
-
-void cd_proj()
-{
-    char *proj_path = get_proj_path();
-    char *command = string_format("cd %s", proj_path);
-    system(command);
-
-    free(command);
-    free(proj_path);
 }
 
 char *get_author_name()
@@ -282,29 +324,52 @@ int set_conf_of_commit(FILE *commit)
     /*2*/ fputs(username, commit);
     /*3*/ fputs(user_email, commit);
     /*4*/ fputs(asctime(timeinfo), commit);
+    return 0;
 }
 
 int commit(int argc, char **argv)
 {
     /*
     file:
-            absolute path
+            absolute path ?
             name
             number of conterbutes
             content
     */
 
-    cd_proj();
-    DIR *folder = opendir(".zrb/stage/");
+    // cd_proj();
+    char *proj_path = get_proj_path();
+    char *command = string_format("%s/.zrb/stage", proj_path);
+    debug_s(command);
 
-    FILE *root = fopen("./.zrb/repo/.root.txt", "w+");
-    commit_in_depth(folder, ".", root);
+    DIR *folder = opendir(command);
+    if (folder == NULL)
+    {
+        perror("opendir the .zrb/stage folder");
+        return -1;
+    }
+    free(command);
+
+    command = string_format("%s/.zrb/repo/.root.txt", proj_path);
+    FILE *root = fopen(command, "w+");
+    if (root == NULL)
+    {
+        perror("fopen the root of seq commits");
+        return -1;
+    }
+    free(command);
+
+    int res = commit_in_depth(folder, "/Users/erfan/Codes/crack/.zrb/stage", "/Users/erfan/Codes/crack/.zrb/repo/.", root);
+    if (res == -1)
+    {
+        return -1;
+    }
 
     // calculate the hash
     char *sha = sha_hash("./.zrb/repo/.root.txt");
 
     // rename the sub name to it's hash
-    char *command = string_format("mv %s %s", "./.zrb/repo/.root.txt", sha);
+    command = string_format("mv %s %s", "./.zrb/repo/.root.txt", sha);
     system(command);
     free(command);
     return 0;
@@ -567,6 +632,7 @@ int show_staged_files(int depth, int top)
             printf("%s/\n", entry->d_name);
         }
     }
+    return 0;
 }
 
 int add(int argc, char **argv)
@@ -701,12 +767,6 @@ void copy_file(FILE *src, FILE *dest)
     }
 }
 
-void write_to_file(FILE *file, char *str)
-{
-    // the file is in the write mode
-    fputs(str, file);
-}
-
 int create_repo(int argc, char **argv)
 {
     if (get_repo_path() != NULL)
@@ -752,7 +812,7 @@ int create_repo(int argc, char **argv)
 
     // create a root commit:
     FILE *root_commit = fopen("./.zrb/files/root.txt", "w");
-    write_to_file(root_commit, "commit root\nroot\n");
+    fputs("commit\nroot\n", root_commit);
 
     fclose(root_commit);
     printf("[SUCC] folder of file has created\n");
