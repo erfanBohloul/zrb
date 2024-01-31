@@ -218,6 +218,9 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *comm
         return NULL;
     }
 
+    // add folder key word to start of "sub_commit_file":
+    fputs("folder\n", sub_commit_file);
+
     struct dirent *entry;
     while ((entry = readdir(folder)) != NULL)
     {
@@ -268,6 +271,9 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *comm
                 continue;
             }
 
+            // add "file" key word to start of the duplicate file in file-repo folder
+            fputs("file\n", file);
+
             // copy content of origin file in stage area into duplicate file in file-repo folder
             copy_file(origin_file, file);
 
@@ -299,6 +305,7 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *comm
 
     char *sha_file = string_format("%s.txt", sha);
     char *sha_file_path = string_format("%s/%s", repo_file_path, sha_file);
+
     // rename the sub name to it's hash
     char *command = string_format("mv %s %s", repo_folder_path, sha_file_path);
     debug_s(command);
@@ -378,14 +385,15 @@ int set_conf_of_commit(FILE *commit)
 int commit(int argc, char **argv)
 {
     /*
-    file:
-            content
+     file:
+        file
+        content
     */
 
     /*
-     folder:
-         folder
-         content
+    folder:
+        folder
+        content
     */
 
     /*
@@ -413,10 +421,10 @@ int commit(int argc, char **argv)
         return -1;
     }
 
-    char *files_repo_path = string_format("%s/.zrb/repo/.", proj_path);
+    // add "commit" key word in the begining of the .root file
+    fputs("commit\n", root);
 
-    debug_s(stage_path);
-    debug_s(files_repo_path);
+    char *files_repo_path = string_format("%s/.zrb/repo/.", proj_path);
 
     char *res = commit_in_depth(folder, stage_path, files_repo_path, root);
     if (res == NULL)
