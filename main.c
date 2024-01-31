@@ -199,7 +199,7 @@ int add_file_to_repo_files(FILE *file, char *file_name, char *repo_path, FILE *c
     return 0;
 }
 
-char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *commit_file)
+char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path)
 {
     if (folder == NULL)
     {
@@ -209,12 +209,11 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *comm
 
     // create a subdir commit-file
     char *repo_folder_path = string_format("%s.txt", repo_path);
-    debug_s(repo_folder_path);
     // create a file with a temprary name
     FILE *sub_commit_file = fopen(repo_folder_path, "w+");
     if (sub_commit_file == NULL)
     {
-        perror("building sub commit folder");
+        perror("[ERROR] building sub commit folder");
         return NULL;
     }
 
@@ -234,23 +233,21 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *comm
         debug_s(entry->d_name);
 
         char *sub_stage_path = string_format("%s/%s", stage_path, entry->d_name);
-        debug_s(sub_stage_path);
         char *sub_repo_path = string_format("%s-%s", repo_path, entry->d_name);
-        debug_s(sub_repo_path);
 
         if (entry->d_type == DT_DIR)
         {
-            char *sub_hash = commit_in_depth(opendir(sub_stage_path), sub_stage_path, sub_repo_path, sub_commit_file);
+            char *sub_hash = commit_in_depth(opendir(sub_stage_path), sub_stage_path, sub_repo_path);
             if (sub_hash == NULL)
             {
                 return NULL;
             }
 
-            char *commannnnnd = string_format("%s %s\n", sub_hash, entry->d_name);
-            debug_s(commannnnnd);
-            fputs(commannnnnd, sub_commit_file);
+            char *commandu = string_format("%s %s\n", sub_hash, entry->d_name);
+            debug_s(commandu);
+            fputs(commandu, sub_commit_file);
 
-            free(commannnnnd);
+            free(commandu);
             free(sub_hash);
         }
 
@@ -290,14 +287,17 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *comm
         }
     }
 
-    // printing the content of sub_commit:
-    printf("\ncontent:\n");
+    fclose(sub_commit_file);
+    sub_commit_file = fopen(repo_folder_path, "r+");
+
     char line[1000];
+    debug_s(repo_folder_path);
+    printf("content:\n");
     while (fgets(line, sizeof line, sub_commit_file))
     {
-        printf("%s\n", line);
+        printf("%s", line);
     }
-    printf("\nend\n\n");
+    printf("end\n");
 
     // calculate the hash
     char *sha = sha_hash(repo_folder_path),
@@ -409,43 +409,65 @@ int commit(int argc, char **argv)
 
     if (folder == NULL)
     {
-        perror("opendir the .zrb/stage folder");
+        perror("[ERROR] opendir the .zrb/stage folder");
         return -1;
     }
-
-    char *root_path = string_format("%s/.zrb/repo/.root.txt", proj_path);
-    FILE *root = fopen(root_path, "w+");
-    if (root == NULL)
-    {
-        perror("fopen the root of seq commits");
-        return -1;
-    }
-
-    // add "commit" key word in the begining of the .root file
-    fputs("commit\n", root);
 
     char *files_repo_path = string_format("%s/.zrb/repo/.", proj_path);
 
-    char *res = commit_in_depth(folder, stage_path, files_repo_path, root);
-    if (res == NULL)
+    char *hash_commit = commit_in_depth(folder, stage_path, files_repo_path);
+    // hash_commit -> hash.txt
+    if (hash_commit == NULL)
     {
-        free(res);
+        free(hash_commit);
+        free(files_repo_path);
         return -1;
     }
 
-    // calculate the hash
-    char *sha = sha_hash(root_path);
-    free(root_path);
+    char *commit_path = string_format("%s/%s", files_repo_path, hash_commit);
+    debug_s(commit_path);
+    FILE *commit_file = fopen(commit_path, "r+");
+    if (commit_file == NULL)
+    {
+        perror("[ERROR] can not find the commit file in commiting process.");
+        return -1;
+    }
 
-    // rename the sub name to it's hash
-    char *mv_command = string_format("mv %s %s", root_path, sha);
-    debug_s(mv_command);
-    system(mv_command);
+    // enter "commit" keyword instead of "folder"
+    // using a very weird way
+    char *tmp_path = string_format("%s/tmp.txt", files_repo_path);
+    FILE *tmp = fopen(tmp_path, "w+");
+    fputs("commit\n", tmp);
+    // skip the first line
+    char line[10000];
+    fgets(line, sizeof line, commit_file);
+    copy_file(commit_file, tmp);
 
-    free(mv_command);
-    free(res);
+    fclose(tmp);
+
+    // delete commit-file
+    char *command = string_format("rm %s", commit_path);
+    debug_s(command);
+    system(command);
+    free(command);
+
+    // get hash of tmp file
+    char *hash = sha_hash(tmp_path);
+    char *hash_file_path = string_format("%s/%s.txt", files_repo_path, hash);
+
+    // rename tmp file to hash name
+    command = string_format("mv %s %s", tmp_path, commit_path);
+    debug_s(command);
+    system(command);
+
+    free(command);
+    free(tmp_path);
+    fclose(commit_file);
     free(stage_path);
     free(files_repo_path);
+    free(commit_path);
+    free(hash_commit);
+    free(proj_path);
     return 0;
 }
 
