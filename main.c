@@ -73,7 +73,7 @@ int main(int argc, char **argv)
     }
     printf("\n");
 
-    func_ptr command_func = input_finder(argc, &argv[1]);
+    func_ptr command_func = input_finder(argc - 1, &argv[1]);
     if (!command_func)
     {
         fprintf(stderr, "there is no command named: \"%s\".\nyou may need some help.\n", argv[1]);
@@ -111,7 +111,13 @@ func_ptr input_finder(int argc, char **argv)
 
     if (!strcmp(command, "commit"))
     {
-        return &commit;
+        if (!strcmp(argv[1], "-m"))
+            return &commit;
+        else if (!strcmp(argv[1], "-s"))
+            return NULL;
+
+        Invalid_Command();
+        return NULL;
     }
 
     // else:
@@ -399,9 +405,25 @@ int commit(int argc, char **argv)
     /*
     commit:
         commit
+        message
         content
     */
 
+    // is it a valid commit command?
+    if (argc != 3)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    if (strlen(argv[2]) > 72)
+    {
+        printf("[ERROR] message length is out of bound!\n");
+        return -1;
+    }
+
+    // erfan bohloul erfan bohloul erfan bohloul erfan bohloul
+    // it is valid
     char *proj_path = get_proj_path();
     char *stage_path = get_stage_path();
 
@@ -438,6 +460,12 @@ int commit(int argc, char **argv)
     char *tmp_path = string_format("%s/tmp.txt", files_repo_path);
     FILE *tmp = fopen(tmp_path, "w+");
     fputs("commit\n", tmp);
+
+    // get message of commit
+    char *message = string_format("%s\n", argv[2]);
+    fputs(message, tmp);
+    free(message);
+
     // skip the first line
     char line[10000];
     fgets(line, sizeof line, commit_file);
