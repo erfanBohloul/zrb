@@ -56,6 +56,11 @@ int change_config(int argc, char **argv);
 
 // commit
 int commit(int argc, char **argv);
+char *get_last_hash_commit_from_this_commit(FILE *commit);
+char *get_author_name_from_this_commit(FILE *commit);
+char *get_author_email_from_this_commit(FILE *commit);
+char *get_time_from_this_commit(FILE *commit);
+char *get_message_from_this_commit(FILE *commit);
 
 int main(int argc, char **argv)
 {
@@ -154,7 +159,6 @@ char *sha_hash(char *path_file)
 {
     char *helper_path = get_helper_file_path();
     char *command = string_format("shasum -a 256 %s > %s", path_file, helper_path);
-    debug_s(command);
     system(command);
     free(command);
 
@@ -189,13 +193,12 @@ int add_file_to_repo_files(FILE *file, char *file_name, char *repo_path, FILE *c
 
     // rename the file to its hash name:
     char *command = string_format("mv %s %s", repo_path, sha_file_path);
-    debug_s(command);
     system(command);
     free(command);
 
     // add this hash to parent-commit folder as an hash
     command = string_format("%s.txt %s\n", sha, file_name);
-    printf("saved in commit: %s\n", command);
+    // printf("saved in commit: %s\n", command);
     fputs(command, commit_file);
     free(command);
 
@@ -250,7 +253,6 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path)
             }
 
             char *commandu = string_format("%s %s\n", sub_hash, entry->d_name);
-            debug_s(commandu);
             fputs(commandu, sub_commit_file);
 
             free(commandu);
@@ -293,17 +295,9 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path)
         }
     }
 
+    // reopen sub_commit_file
     fclose(sub_commit_file);
     sub_commit_file = fopen(repo_folder_path, "r+");
-
-    char line[1000];
-    debug_s(repo_folder_path);
-    printf("content:\n");
-    while (fgets(line, sizeof line, sub_commit_file))
-    {
-        printf("%s", line);
-    }
-    printf("end\n");
 
     // calculate the hash
     char *sha = sha_hash(repo_folder_path),
@@ -314,7 +308,6 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path)
 
     // rename the sub name to it's hash
     char *command = string_format("mv %s %s", repo_folder_path, sha_file_path);
-    debug_s(command);
     system(command);
 
     free(command);
@@ -353,26 +346,32 @@ char *get_author_email()
     }
 
     // skip first line
-    fgets(NULL, 0, conf);
+    char line[10000];
+    fgets(line, 10000, conf);
 
     char author_email[1000];
     fscanf(conf, "%*s = %s", author_email);
     return strdup(author_email);
 }
 
-int set_conf_of_commit(FILE *commit)
+int set_conf_of_commit(FILE *commit, char *message)
 {
     /*
         1. commit
-        2. user.name
-        3. user.email
-        4. time
-        5. hash of last commit
+        2. hash of last commit
+        3. user.name
+        4. user.email
+        5. time
+        6. message
     */
 
     // author info
     char *username = get_author_name(),
          *user_email = get_author_email();
+
+    strcat(username, "\n");
+    strcat(user_email, "\n");
+    char *mess = string_format("%s\n", message);
 
     // time
     struct tm *timeinfo;
@@ -382,10 +381,114 @@ int set_conf_of_commit(FILE *commit)
 
     // write to the file
     /*1*/ fputs("commit\n", commit);
-    /*2*/ fputs(username, commit);
-    /*3*/ fputs(user_email, commit);
-    /*4*/ fputs(asctime(timeinfo), commit);
+    /*2*/ fputs("root.txt\n", commit);
+    /*3*/ fputs(username, commit);
+    /*4*/ fputs(user_email, commit);
+    /*5*/ fputs(asctime(timeinfo), commit);
+    /*6*/ fputs(mess, commit);
+
+    free(username);
+    free(user_email);
+    free(mess);
     return 0;
+}
+
+char *get_last_hash_commit_from_this_commit(FILE *commit)
+{
+    rewind(commit);
+
+    char line[10000];
+    // travel to line 2
+    for (int i = 1; i <= 2; i++)
+    {
+        fgets(line, sizeof line, commit);
+    }
+
+    return strdup(line);
+}
+
+char *get_author_name_from_this_commit(FILE *commit)
+{
+    rewind(commit);
+
+    char line[10000];
+
+    // travel to line 3
+    for (int i = 1; i <= 3; i++)
+    {
+        fgets(line, sizeof line, commit);
+    }
+
+    return strdup(line);
+}
+
+char *get_author_email_from_this_commit(FILE *commit)
+{
+    rewind(commit);
+
+    char line[10000];
+
+    // travel to line 4
+    for (int i = 1; i <= 4; i++)
+    {
+        fgets(line, sizeof line, commit);
+    }
+
+    return strdup(line);
+}
+
+char *get_time_from_this_commit(FILE *commit)
+{
+    rewind(commit);
+
+    char line[10000];
+
+    // travel to line 5
+    for (int i = 1; i <= 5; i++)
+    {
+        fgets(line, sizeof line, commit);
+    }
+
+    return strdup(line);
+}
+
+char *get_message_from_this_commit(FILE *commit)
+{
+    rewind(commit);
+
+    char line[10000];
+
+    // travel to line 6
+    for (int i = 1; i <= 6; i++)
+    {
+        fgets(line, sizeof line, commit);
+    }
+
+    return strdup(line);
+}
+
+void flush_commit_info(char *commit_path, char *hash)
+{
+    FILE *file = fopen(commit_path, "r+");
+    if (!file)
+    {
+        perror("[ERROR] can not open commit file to flush the info");
+        return;
+    }
+
+    char *message = get_message_from_this_commit(file),
+         *author_name = get_author_name_from_this_commit(file),
+         *author_email = get_author_email_from_this_commit(file),
+         *time = get_time_from_this_commit(file),
+         *id = string_format("%s\n", hash);
+    printf("id-> %stime-> %sauthor: %sauthor-email: %smessage: %s", id, time, author_name, author_email, message);
+
+    free(message);
+    free(author_email);
+    free(author_name);
+    free(time);
+    free(id);
+    return;
 }
 
 int commit(int argc, char **argv)
@@ -410,7 +513,7 @@ int commit(int argc, char **argv)
     */
 
     // is it a valid commit command?
-    if (argc != 3)
+    if (argc != 3 || !strlen(argv[2]))
     {
         Invalid_Command();
         return -1;
@@ -447,7 +550,6 @@ int commit(int argc, char **argv)
     }
 
     char *commit_path = string_format("%s/%s", files_repo_path, hash_commit);
-    debug_s(commit_path);
     FILE *commit_file = fopen(commit_path, "r+");
     if (commit_file == NULL)
     {
@@ -459,12 +561,8 @@ int commit(int argc, char **argv)
     // using a very weird way
     char *tmp_path = string_format("%s/tmp.txt", files_repo_path);
     FILE *tmp = fopen(tmp_path, "w+");
-    fputs("commit\n", tmp);
 
-    // get message of commit
-    char *message = string_format("%s\n", argv[2]);
-    fputs(message, tmp);
-    free(message);
+    set_conf_of_commit(tmp, argv[2]);
 
     // skip the first line
     char line[10000];
@@ -475,7 +573,6 @@ int commit(int argc, char **argv)
 
     // delete commit-file
     char *command = string_format("rm %s", commit_path);
-    debug_s(command);
     system(command);
     free(command);
 
@@ -484,9 +581,14 @@ int commit(int argc, char **argv)
     char *hash_file_path = string_format("%s/%s.txt", files_repo_path, hash);
 
     // rename tmp file to hash name
-    command = string_format("mv %s %s", tmp_path, commit_path);
-    debug_s(command);
+    command = string_format("mv %s %s", tmp_path, hash_file_path);
     system(command);
+
+    // print the message of succ
+    printf("[SUCC] commited!\n");
+
+    // print the info of this commit out
+    flush_commit_info(hash_file_path, hash);
 
     free(command);
     free(tmp_path);
