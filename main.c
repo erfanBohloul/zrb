@@ -43,6 +43,8 @@ char *get_author_name();
 char *get_author_email();
 FILE *get_helper_file();
 char *get_helper_file_path();
+char *get_stage_path();
+char *get_file_repo_path();
 
 // errors:
 void Undefined_Behaviour();
@@ -166,36 +168,43 @@ char *sha_hash(char *path_file)
     return strdup(hash);
 }
 
-int add_file_to_repo_files(FILE *file, char *file_name, char *path, FILE *commit_file)
+int add_file_to_repo_files(FILE *file, char *file_name, char *repo_path, FILE *commit_file)
 {
 
     // hash file with sha algo
-    char *sha = sha_hash(path);
+    char *sha = sha_hash(repo_path);
     if (sha == NULL)
     {
         return -1;
     }
 
-    // create a txt file to hold the content of commited file
-    FILE *hash_file = fopen(sha, "w+");
-    copy_file(file, hash_file);
-    fclose(hash_file);
+    char *file_repo_path = get_file_repo_path();
+    char *sha_file_path = string_format("%s/%s.txt", file_repo_path, sha);
 
-    char *command = string_format("%s %s\n", sha, file_name);
+    // rename the file to its hash name:
+    char *command = string_format("mv %s %s", repo_path, sha_file_path);
+    debug_s(command);
+    system(command);
+    free(command);
+
+    // add this hash to parent-commit folder as an hash
+    command = string_format("%s.txt %s\n", sha, file_name);
+    printf("saved in commit: %s\n", command);
     fputs(command, commit_file);
     free(command);
-    printf("saved in commit: %s %s\n", sha, file_name);
 
     free(sha);
+    free(sha_file_path);
+    free(file_repo_path);
     return 0;
 }
 
-int commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *commit_file)
+char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *commit_file)
 {
     if (folder == NULL)
     {
         perror("[ERROR] can not going depth with null folder");
-        return -1;
+        return NULL;
     }
 
     // create a subdir commit-file
@@ -206,7 +215,7 @@ int commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *commit
     if (sub_commit_file == NULL)
     {
         perror("building sub commit folder");
-        return -1;
+        return NULL;
     }
 
     struct dirent *entry;
@@ -221,49 +230,88 @@ int commit_in_depth(DIR *folder, char *stage_path, char *repo_path, FILE *commit
 
         debug_s(entry->d_name);
 
+        char *sub_stage_path = string_format("%s/%s", stage_path, entry->d_name);
+        debug_s(sub_stage_path);
+        char *sub_repo_path = string_format("%s-%s", repo_path, entry->d_name);
+        debug_s(sub_repo_path);
+
         if (entry->d_type == DT_DIR)
         {
-            char *sub_stage_path = string_format("%s/%s", stage_path, entry->d_name);
-            debug_s(sub_stage_path);
-            char *sub_repo_path = string_format("%s-%s", repo_path, entry->d_name);
-            debug_s(sub_repo_path);
-            int res = commit_in_depth(opendir(sub_stage_path), sub_stage_path, sub_repo_path, sub_commit_file);
-            if (res == -1)
-                return -1;
+            char *sub_hash = commit_in_depth(opendir(sub_stage_path), sub_stage_path, sub_repo_path, sub_commit_file);
+            if (sub_hash == NULL)
+            {
+                return NULL;
+            }
 
-            free(sub_repo_path);
+            char *commannnnnd = string_format("%s %s\n", sub_hash, entry->d_name);
+            debug_s(commannnnnd);
+            fputs(commannnnnd, sub_commit_file);
+
+            free(commannnnnd);
+            free(sub_hash);
         }
 
         else
         {
             // its a file
-            char *file_path = string_format("%s-%s", repo_path, entry->d_name);
-            FILE *file = fopen(file_path, "w+");
-            add_file_to_repo_files(file, entry->d_name, file_path, sub_commit_file);
+            FILE *file = fopen(sub_repo_path, "w+");
+            if (file == NULL)
+            {
+                perror("[ERROR] can not create a duplicate in file-repo");
+                continue;
+            }
+
+            FILE *origin_file = fopen(sub_stage_path, "r+");
+            if (origin_file == NULL)
+            {
+                perror("[ERROR] can not open the origin file from stage area");
+                continue;
+            }
+
+            // copy content of origin file in stage area into duplicate file in file-repo folder
+            copy_file(origin_file, file);
+
+            // this function create a hash of dup file and then rename it with hash name
+            int res = add_file_to_repo_files(file, entry->d_name, sub_repo_path, sub_commit_file);
+            if (res == -1)
+            {
+                perror("[ERROR] can not commit file");
+                continue;
+            }
+
+            free(sub_repo_path);
+            free(sub_stage_path);
         }
     }
 
+    // printing the content of sub_commit:
+    printf("\ncontent:\n");
+    char line[1000];
+    while (fgets(line, sizeof line, sub_commit_file))
+    {
+        printf("%s\n", line);
+    }
+    printf("\nend\n\n");
+
     // calculate the hash
-    char *sha = sha_hash(repo_folder_path);
+    char *sha = sha_hash(repo_folder_path),
+         *repo_file_path = get_file_repo_path();
+
     char *sha_file = string_format("%s.txt", sha);
+    char *sha_file_path = string_format("%s/%s", repo_file_path, sha_file);
     // rename the sub name to it's hash
-    char *command = string_format("mv %s %s", repo_folder_path, sha_file);
+    char *command = string_format("mv %s %s", repo_folder_path, sha_file_path);
     debug_s(command);
     system(command);
 
     free(command);
-    free(sha_file);
-    // write the SHA in the parent directory
-    command = string_format("%s %s\n", sha_file, readdir(folder)->d_name);
-    printf("[SUCC] dfg\n");
-    fputs(command, commit_file);
-    printf("saved in commit: %s", command);
-    free(command);
-
     free(repo_folder_path);
-    fclose(sub_commit_file);
     free(sha);
-    return 0;
+    free(repo_file_path);
+    free(sha_file_path);
+    fclose(sub_commit_file);
+
+    return sha_file;
 }
 
 char *get_author_name()
@@ -331,47 +379,65 @@ int commit(int argc, char **argv)
 {
     /*
     file:
-            absolute path ?
-            name
-            number of conterbutes
             content
     */
 
-    // cd_proj();
-    char *proj_path = get_proj_path();
-    char *command = string_format("%s/.zrb/stage", proj_path);
-    debug_s(command);
+    /*
+     folder:
+         folder
+         content
+    */
 
-    DIR *folder = opendir(command);
+    /*
+    commit:
+        commit
+        content
+    */
+
+    char *proj_path = get_proj_path();
+    char *stage_path = get_stage_path();
+
+    DIR *folder = opendir(stage_path);
+
     if (folder == NULL)
     {
         perror("opendir the .zrb/stage folder");
         return -1;
     }
-    free(command);
 
-    command = string_format("%s/.zrb/repo/.root.txt", proj_path);
-    FILE *root = fopen(command, "w+");
+    char *root_path = string_format("%s/.zrb/repo/.root.txt", proj_path);
+    FILE *root = fopen(root_path, "w+");
     if (root == NULL)
     {
         perror("fopen the root of seq commits");
         return -1;
     }
-    free(command);
 
-    int res = commit_in_depth(folder, "/Users/erfan/Codes/crack/.zrb/stage", "/Users/erfan/Codes/crack/.zrb/repo/.", root);
-    if (res == -1)
+    char *files_repo_path = string_format("%s/.zrb/repo/.", proj_path);
+
+    debug_s(stage_path);
+    debug_s(files_repo_path);
+
+    char *res = commit_in_depth(folder, stage_path, files_repo_path, root);
+    if (res == NULL)
     {
+        free(res);
         return -1;
     }
 
     // calculate the hash
-    char *sha = sha_hash("./.zrb/repo/.root.txt");
+    char *sha = sha_hash(root_path);
+    free(root_path);
 
     // rename the sub name to it's hash
-    command = string_format("mv %s %s", "./.zrb/repo/.root.txt", sha);
-    system(command);
-    free(command);
+    char *mv_command = string_format("mv %s %s", root_path, sha);
+    debug_s(mv_command);
+    system(mv_command);
+
+    free(mv_command);
+    free(res);
+    free(stage_path);
+    free(files_repo_path);
     return 0;
 }
 
@@ -895,6 +961,22 @@ char *get_proj_path()
     }
 
     return NULL;
+}
+
+char *get_stage_path()
+{
+    char *repo_path = get_repo_path();
+    char *res = string_format("%s/stage", repo_path);
+    free(repo_path);
+    return res;
+}
+
+char *get_file_repo_path()
+{
+    char *proj_path = get_proj_path();
+    char *res = string_format("%s/.zrb/repo", proj_path);
+    free(proj_path);
+    return res;
 }
 
 void Undefined_Behaviour()
