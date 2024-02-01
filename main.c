@@ -55,12 +55,18 @@ void Not_repo();
 int change_config(int argc, char **argv);
 
 // commit
-int commit(int argc, char **argv);
+int pre_commit(int argc, char **argv);
+int commit(char *message);
 char *get_last_hash_commit_from_this_commit(FILE *commit);
 char *get_author_name_from_this_commit(FILE *commit);
 char *get_author_email_from_this_commit(FILE *commit);
 char *get_time_from_this_commit(FILE *commit);
 char *get_message_from_this_commit(FILE *commit);
+int shortcut_commit(int argc, char **argv);
+
+// set
+int set(int argc, char **argv);
+char *get_commit_shortcut_key(char *shortcut);
 
 int main(int argc, char **argv)
 {
@@ -83,6 +89,16 @@ int main(int argc, char **argv)
     {
         fprintf(stderr, "there is no command named: \"%s\".\nyou may need some help.\n", argv[1]);
         return 0;
+    }
+
+    if (command_func != &create_repo)
+    {
+        char *repo = get_repo_path();
+        if (get_repo_path() == NULL)
+        {
+            printf("[ERROR] not a zrb repo.\n");
+            return -1;
+        }
     }
 
     int status = command_func(argc - 1, &argv[1]);
@@ -117,12 +133,17 @@ func_ptr input_finder(int argc, char **argv)
     if (!strcmp(command, "commit"))
     {
         if (!strcmp(argv[1], "-m"))
-            return &commit;
+            return &pre_commit;
         else if (!strcmp(argv[1], "-s"))
-            return NULL;
+            return &shortcut_commit;
 
         Invalid_Command();
         return NULL;
+    }
+
+    if (!strcmp(command, "set"))
+    {
+        return &set;
     }
 
     // else:
@@ -145,6 +166,106 @@ FILE *get_helper_file()
     free(proj_path);
     free(command);
     return helper;
+}
+
+int shortcut_commit(int argc, char **argv)
+{
+    if (argc != 3)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    char *val = get_commit_shortcut_key(argv[2]);
+    if (val == NULL)
+    {
+        printf("[ERROR] such key doesn't exists!\n");
+        return -1;
+    }
+
+    int res = commit(val);
+
+    free(val);
+    return res;
+}
+
+char *get_commit_shortcut_key(char *shortcut)
+{
+    char line[10000];
+    FILE *alias = fopen(alias_path, "r+");
+
+    char key[100], *val;
+    while (fgets(line, sizeof line, alias))
+    {
+        sscanf(line, "%s", key);
+
+        if (!strcmp(key, "g"))
+            continue;
+
+        // get key and val from the line
+        sscanf(line + 2, "%s", key);
+        val = line + 2 + strlen(key) + 1;
+
+        // check if key is the shortcut
+        if (!strcmp(key, shortcut))
+        {
+            printf("key:%s, val:%s\n", key, val);
+            return strdup(val);
+        }
+    }
+
+    return NULL;
+}
+
+int set(int argc, char **argv)
+{
+    // check if command is valid:
+    if (argc != 5)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    if (strcmp(argv[1], "-m") || strcmp(argv[3], "-s"))
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    char *val = get_commit_shortcut_key(argv[4]);
+    if (val)
+    {
+        printf("[ERROR] this shortcut already exists");
+        return -1;
+    }
+    free(val);
+
+    // create a new shortcut:
+    FILE *alias = fopen(alias_path, "a");
+    val = argv[2];
+    char *key = argv[4];
+
+    // is message valid?
+    if (strlen(val) == 0)
+    {
+        printf("[ERROR] invalid value for alias. It should not be empty.\n");
+        return -1;
+    }
+
+    if (strlen(val) > 72)
+    {
+        printf("[ERROR] the length of your commit message should not exceed 72 characters\n");
+        return -1;
+    }
+
+    char line[10000];
+    sprintf(line, "m %s %s", key, val);
+    fputs(line, alias);
+    fclose(alias);
+
+    // succ message:
+    printf("[SUCC] the new commit shortcut has added\n");
+    return 0;
 }
 
 char *get_helper_file_path()
@@ -491,7 +612,18 @@ void flush_commit_info(char *commit_path, char *hash)
     return;
 }
 
-int commit(int argc, char **argv)
+int pre_commit(int argc, char **argv)
+{
+    if (argc != 3)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    return commit(argv[2]);
+}
+
+int commit(char *message)
 {
     /*
      file:
@@ -512,16 +644,16 @@ int commit(int argc, char **argv)
         content
     */
 
-    // is it a valid commit command?
-    if (argc != 3 || !strlen(argv[2]))
+    // is message valid?
+    if (strlen(message) > 72)
     {
-        Invalid_Command();
+        printf("[ERROR] message length is out of bound!\n");
         return -1;
     }
 
-    if (strlen(argv[2]) > 72)
+    if (strlen(message) == 0)
     {
-        printf("[ERROR] message length is out of bound!\n");
+        printf("[ERROR] you can't commit without message\n");
         return -1;
     }
 
@@ -562,7 +694,7 @@ int commit(int argc, char **argv)
     char *tmp_path = string_format("%s/tmp.txt", files_repo_path);
     FILE *tmp = fopen(tmp_path, "w+");
 
-    set_conf_of_commit(tmp, argv[2]);
+    set_conf_of_commit(tmp, message);
 
     // skip the first line
     char line[10000];
@@ -1098,6 +1230,10 @@ char *get_parent_folder(char *path)
 char *get_repo_path()
 {
     char *proj = get_proj_path();
+
+    if (proj == NULL)
+        return NULL;
+
     strcat(proj, "/.zrb");
     return proj;
 }
