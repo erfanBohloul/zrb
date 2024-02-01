@@ -45,6 +45,8 @@ FILE *get_helper_file();
 char *get_helper_file_path();
 char *get_stage_path();
 char *get_file_repo_path();
+void clear_stage();
+int is_stage_empty();
 
 // errors:
 void Undefined_Behaviour();
@@ -609,6 +611,7 @@ int set_conf_of_commit(FILE *commit, char *message)
         4. user.email
         5. time
         6. message
+        7. branch
     */
 
     // author info
@@ -748,6 +751,34 @@ int pre_commit(int argc, char **argv)
     return commit(argv[2]);
 }
 
+void clear_stage()
+{
+    char *stage_path = get_stage_path();
+    char *command = string_format("rm -r %s/*", stage_path);
+    system(command);
+    free(command);
+    free(stage_path);
+}
+
+int is_stage_empty()
+{
+    char *stage_path = get_stage_path();
+    struct dirent *entry;
+    DIR *dir = opendir(stage_path);
+    int flag = 1;
+    while ((entry = readdir(dir)) != NULL)
+    {
+        /* skip . and .. */
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
+
+        flag = 0;
+    }
+    closedir(dir);
+    free(stage_path);
+    return flag;
+}
+
 int commit(char *message)
 {
     /*
@@ -765,7 +796,12 @@ int commit(char *message)
     /*
     commit:
         commit
+        hash of last commit
+        user.name
+        user.email
+        time
         message
+        branch
         content
     */
 
@@ -786,6 +822,12 @@ int commit(char *message)
     // it is valid
     char *proj_path = get_proj_path();
     char *stage_path = get_stage_path();
+
+    if (is_stage_empty())
+    {
+        printf("[ERROR] there is noting in stage area.\n");
+        return -2;
+    }
 
     DIR *folder = opendir(stage_path);
 
@@ -840,6 +882,9 @@ int commit(char *message)
     // rename tmp file to hash name
     command = string_format("mv %s %s", tmp_path, hash_file_path);
     system(command);
+
+    // removing content of stage area:
+    clear_stage();
 
     // print the message of succ
     printf("[SUCC] commited!\n");
