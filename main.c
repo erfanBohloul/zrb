@@ -63,10 +63,12 @@ char *get_author_email_from_this_commit(FILE *commit);
 char *get_time_from_this_commit(FILE *commit);
 char *get_message_from_this_commit(FILE *commit);
 int shortcut_commit(int argc, char **argv);
+int replace_commit_shortcut(int argc, char **argv);
+int remove_commit_shortcut(int argc, char **argv);
 
 // set
 int set(int argc, char **argv);
-char *get_commit_shortcut_key(char *shortcut);
+char *get_commit_shortcut_val(char *shortcut);
 
 int main(int argc, char **argv)
 {
@@ -146,6 +148,16 @@ func_ptr input_finder(int argc, char **argv)
         return &set;
     }
 
+    if (!strcmp(command, "replace"))
+    {
+        return &replace_commit_shortcut;
+    }
+
+    if (!strcmp(command, "remove"))
+    {
+        return &remove_commit_shortcut;
+    }
+
     // else:
     Invalid_Command();
 
@@ -168,6 +180,119 @@ FILE *get_helper_file()
     return helper;
 }
 
+int remove_commit_shortcut(int argc, char **argv)
+{
+    if (argc != 3)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    if (strcmp(argv[1], "-s"))
+    {
+        printf("[ERROR] there is no option named  \"%s\"\n", argv[1]);
+        return -1;
+    }
+
+    char *key = argv[2],
+         *val = get_commit_shortcut_val(key);
+
+    if (val == NULL)
+    {
+        printf("[ERROR] No such shortcut exists.\n");
+        return -1;
+    }
+    free(val);
+
+    FILE *alias = fopen(alias_path, "r");
+    char line[10000], buff[10000] = "", key_[100];
+    while (fgets(line, sizeof line, alias))
+    {
+        sscanf(line, "%s", key_);
+        if (!strcmp(key_, "m"))
+        {
+
+            sscanf(line + 2, "%s", key_);
+            if (!strcmp(key_, key))
+                continue;
+        }
+
+        strcat(buff, line);
+    }
+
+    fclose(alias);
+    alias = fopen(alias_path, "w");
+    fprintf(alias, "%s", buff);
+    fclose(alias);
+
+    printf("[SUCC] The commit shortcut has been removed successfully.\n");
+    return 0;
+}
+
+int replace_commit_shortcut(int argc, char **argv)
+{
+    if (argc != 5)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    char *val = argv[2],
+         *key = argv[4];
+
+    // is message valid?
+    if (strlen(val) == 0)
+    {
+        printf("[ERROR] invalid value for alias. It should not be empty.\n");
+        return -1;
+    }
+
+    if (strlen(val) > 72)
+    {
+        printf("[ERROR] the length of your commit message should not exceed 72 characters\n");
+        return -1;
+    }
+
+    char *tmp = get_commit_shortcut_val(key);
+    if (tmp == NULL)
+    {
+        printf("[ERROR] such key doesn't exists.\n");
+        return -1;
+    }
+    free(tmp);
+
+    // go throw alias and then find the line that key exists and then change the value:
+    char line[10000], key_[100], j[10000] = "";
+    FILE *alias = fopen(alias_path, "r");
+    if (alias == NULL)
+    {
+        perror("[ERROR] can not open alias file");
+        return -1;
+    }
+
+    for (; fgets(line, sizeof line, alias); strcat(j, line))
+    {
+        sscanf(line, "%s", key_);
+        if (strcmp(key_, "m"))
+            continue;
+
+        sscanf(line + 2, "%s", key_);
+        if (strcmp(key_, key))
+            continue;
+
+        sprintf(line, "m %s %s\n", key, val);
+    }
+
+    fclose(alias);
+    alias = fopen(alias_path, "w");
+    fprintf(alias, "%s", j);
+
+    fclose(alias);
+
+    printf("[SUCC] the replacement was successful.\n");
+    return 0;
+}
+
 int shortcut_commit(int argc, char **argv)
 {
     if (argc != 3)
@@ -176,7 +301,7 @@ int shortcut_commit(int argc, char **argv)
         return -1;
     }
 
-    char *val = get_commit_shortcut_key(argv[2]);
+    char *val = get_commit_shortcut_val(argv[2]);
     if (val == NULL)
     {
         printf("[ERROR] such key doesn't exists!\n");
@@ -189,7 +314,7 @@ int shortcut_commit(int argc, char **argv)
     return res;
 }
 
-char *get_commit_shortcut_key(char *shortcut)
+char *get_commit_shortcut_val(char *shortcut)
 {
     char line[10000];
     FILE *alias = fopen(alias_path, "r+");
@@ -232,7 +357,7 @@ int set(int argc, char **argv)
         return -1;
     }
 
-    char *val = get_commit_shortcut_key(argv[4]);
+    char *val = get_commit_shortcut_val(argv[4]);
     if (val)
     {
         printf("[ERROR] this shortcut already exists");
