@@ -45,6 +45,7 @@ FILE *get_helper_file();
 char *get_helper_file_path();
 char *get_stage_path();
 char *get_file_repo_path();
+char *get_branches_path();
 void clear_stage();
 int is_stage_empty();
 
@@ -64,13 +65,21 @@ char *get_author_name_from_this_commit(FILE *commit);
 char *get_author_email_from_this_commit(FILE *commit);
 char *get_time_from_this_commit(FILE *commit);
 char *get_message_from_this_commit(FILE *commit);
-int shortcut_commit(int argc, char **argv);
-int replace_commit_shortcut(int argc, char **argv);
-int remove_commit_shortcut(int argc, char **argv);
+char *get_latest_commit();
 
 // set
 int set(int argc, char **argv);
 char *get_commit_shortcut_val(char *shortcut);
+int shortcut_commit(int argc, char **argv);
+int replace_commit_shortcut(int argc, char **argv);
+int remove_commit_shortcut(int argc, char **argv);
+
+// branch
+int branch(int argc, char **argv);
+int create_branch(char *new_branch_name);
+char *get_head_commit_this_branch(char *branch_name);
+char *get_curr_branch();
+FILE *get_branches_file(char *mode);
 
 int main(int argc, char **argv)
 {
@@ -160,9 +169,131 @@ func_ptr input_finder(int argc, char **argv)
         return &remove_commit_shortcut;
     }
 
+    if (!strcmp(command, "branch"))
+    {
+        return &branch;
+    }
+
     // else:
     Invalid_Command();
 
+    return NULL;
+}
+
+int branch(int argc, char **argv)
+{
+    if (argc == 2)
+    {
+        char *branch_name = argv[1];
+        return create_branch(branch_name);
+    }
+
+    Invalid_Command();
+    return -1;
+}
+
+int create_branch(char *new_branch_name)
+{
+    // is it a valid name?
+    if (new_branch_name == NULL || strlen(new_branch_name) == 0)
+    {
+        printf("[ERROR] Please provide a valid name for the new branch.\n");
+        return -1;
+    }
+
+    if (strstr(new_branch_name, " "))
+    {
+        printf("[ERROR]  Branch names cannot contain spaces. Try using hyphens or underscores instead.\n");
+        return -1;
+    }
+
+    // check if this name already exists
+    char *head_commit = get_head_commit_this_branch(new_branch_name);
+    if (head_commit != NULL)
+    {
+        free(head_commit);
+        printf("[ERROR] The branch %s already exists", new_branch_name);
+        return -1;
+    }
+
+    char *latest_commit = get_latest_commit();
+
+    // make new branch with that point to latest commit
+    FILE *branches = get_branches_file("a");
+    if (branches == NULL)
+        return -1;
+
+    char line[10000];
+    sprintf(line, "%s %s", new_branch_name, latest_commit);
+    fputs(line, branches);
+
+    free(head_commit);
+    free(latest_commit);
+    fclose(branches);
+
+    printf("[SUCC] the new branch has added\n");
+    return 0;
+}
+
+char *get_latest_commit()
+{
+    char *curr_branch = get_curr_branch();
+    char *lastest = get_head_commit_this_branch(curr_branch);
+
+    free(curr_branch);
+    return lastest;
+}
+
+char *get_curr_branch()
+{
+    char *branch_path = get_branches_path();
+    FILE *branches = fopen(branch_path, "r");
+    if (branches == NULL)
+    {
+        perror("[ERROR] can not open branches file");
+        return NULL;
+    }
+    free(branch_path);
+
+    char line[10000], name[100], commit_hash[1000], state[100];
+    while (fgets(line, sizeof line, branches))
+    {
+        sscanf(line, "%s %s %s", name, commit_hash, state);
+        if (!strcmp(state, "curr"))
+        {
+            fclose(branches);
+            return strdup(name);
+        }
+    }
+
+    fclose(branches);
+    printf("[ERROR] can not find the curr branch... why?\n");
+    return NULL;
+}
+
+char *get_head_commit_this_branch(char *branch_name)
+{
+    char *branch_path = get_branches_path();
+    FILE *branches = fopen(branch_path, "r");
+    if (branches == NULL)
+    {
+        perror("[ERROR] can not open branches file");
+        return NULL;
+    }
+    free(branch_path);
+
+    char line[10000], name[100], commit_hash[1000], state[100];
+    while (fgets(line, sizeof line, branches))
+    {
+        sscanf(line, "%s %s %s", name, commit_hash, state);
+        if (!strcmp(name, branch_name))
+        {
+            fclose(branches);
+            return strdup(commit_hash);
+        }
+    }
+
+    fclose(branches);
     return NULL;
 }
 
@@ -180,6 +311,19 @@ FILE *get_helper_file()
     free(proj_path);
     free(command);
     return helper;
+}
+
+FILE *get_branches_file(char *mode)
+{
+    char *branches_path = get_branches_path();
+    FILE *branches = fopen(branches_path, mode);
+    if (branches == NULL)
+    {
+        perror("opening branches file");
+    }
+
+    free(branches_path);
+    return branches;
 }
 
 int remove_commit_shortcut(int argc, char **argv)
@@ -1376,6 +1520,20 @@ int create_repo(int argc, char **argv)
     fclose(log);
     printf("[SUCC] log.txt has created\n");
 
+    // create branches file
+    FILE *branches = fopen("./.zrb/branches.txt", "w");
+    if (!branches)
+    {
+        perror("[ERROR] fopen branches.txt");
+        return -1;
+    }
+
+    // adding master (default) branch to branches
+    fprintf(branches, "master root curr\n");
+
+    fclose(branches);
+    printf("[SUCC] branches.txt has created\n");
+
     return 0;
 }
 
@@ -1435,6 +1593,15 @@ char *get_stage_path()
     char *res = string_format("%s/stage", repo_path);
     free(repo_path);
     return res;
+}
+
+char *get_branches_path()
+{
+    char *repo_path = get_repo_path();
+    char *branch_path = string_format("%s/branches.txt", repo_path);
+
+    free(repo_path);
+    return branch_path;
 }
 
 char *get_file_repo_path()
