@@ -80,6 +80,8 @@ int create_branch(char *new_branch_name);
 char *get_head_commit_this_branch(char *branch_name);
 char *get_curr_branch();
 FILE *get_branches_file(char *mode);
+int change_head_of_curr_branch(char *new_head_hash);
+int change_head_of_branch(char *branch_name, char *new_head_hash);
 
 int main(int argc, char **argv)
 {
@@ -610,8 +612,9 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path)
 
     // create a subdir commit-file
     char *repo_folder_path = string_format("%s.txt", repo_path);
+    debug_s(repo_folder_path);
     // create a file with a temprary name
-    FILE *sub_commit_file = fopen(repo_folder_path, "w+");
+    FILE *sub_commit_file = fopen(repo_folder_path, "w");
     if (sub_commit_file == NULL)
     {
         perror("[ERROR] building sub commit folder");
@@ -772,17 +775,33 @@ int set_conf_of_commit(FILE *commit, char *message)
     time(&curr);
     timeinfo = localtime(&curr);
 
+    char *tmp;
+    // branch
+    char *curr_branch = get_curr_branch();
+
+    // last commit
+    tmp = get_head_commit_this_branch(curr_branch);
+    char *head = string_format("%s\n", tmp);
+
+    free(tmp);
+    tmp = curr_branch;
+    curr_branch = string_format("%s\n", tmp);
+    free(tmp);
+
     // write to the file
     /*1*/ fputs("commit\n", commit);
-    /*2*/ fputs("root.txt\n", commit);
+    /*2*/ fputs(head, commit);
     /*3*/ fputs(username, commit);
     /*4*/ fputs(user_email, commit);
     /*5*/ fputs(asctime(timeinfo), commit);
     /*6*/ fputs(mess, commit);
+    /*7*/ fputs(curr_branch, commit);
 
     free(username);
     free(user_email);
     free(mess);
+    free(curr_branch);
+    free(head);
     return 0;
 }
 
@@ -860,6 +879,21 @@ char *get_message_from_this_commit(FILE *commit)
     return strdup(line);
 }
 
+char *get_branch_from_this_commit(FILE *commit)
+{
+    rewind(commit);
+
+    char line[10000];
+
+    // travel to line 7
+    for (int i = 1; i <= 7; i++)
+    {
+        fgets(line, sizeof line, commit);
+    }
+
+    return strdup(line);
+}
+
 void flush_commit_info(char *commit_path, char *hash)
 {
     FILE *file = fopen(commit_path, "r+");
@@ -873,8 +907,9 @@ void flush_commit_info(char *commit_path, char *hash)
          *author_name = get_author_name_from_this_commit(file),
          *author_email = get_author_email_from_this_commit(file),
          *time = get_time_from_this_commit(file),
-         *id = string_format("%s\n", hash);
-    printf("id-> %stime-> %sauthor: %sauthor-email: %smessage: %s", id, time, author_name, author_email, message);
+         *id = string_format("%s\n", hash),
+         *last_commit = get_last_hash_commit_from_this_commit(file);
+    printf("id-> %stime-> %slast_commit-> %sauthor: %sauthor-email: %smessage: %s", id, time, last_commit, author_name, author_email, message);
 
     free(message);
     free(author_email);
@@ -962,7 +997,6 @@ int commit(char *message)
         return -1;
     }
 
-    // erfan bohloul erfan bohloul erfan bohloul erfan bohloul
     // it is valid
     char *proj_path = get_proj_path();
     char *stage_path = get_stage_path();
@@ -1030,6 +1064,9 @@ int commit(char *message)
     // removing content of stage area:
     clear_stage();
 
+    // change the head of the curr branch to this one
+    change_head_of_curr_branch(hash);
+
     // print the message of succ
     printf("[SUCC] commited!\n");
 
@@ -1045,6 +1082,68 @@ int commit(char *message)
     free(hash_commit);
     free(proj_path);
     return 0;
+}
+
+int change_head_of_branch(char *branch_name, char *new_head_hash)
+{
+    char *branches_path = get_branches_path();
+    FILE *branches = fopen(branches_path, "r");
+    if (branches == NULL)
+    {
+        perror("[ERROR] can not find the branches file.");
+        return -1;
+    }
+
+    char line[10000], name[100], head[1000], state[100], tmp[10000] = "";
+    while (fgets(line, sizeof line, branches))
+    {
+        sscanf(line, "%s %s %s", name, head, state);
+
+        if (!strcmp(name, branch_name))
+        {
+            sprintf(line, "%s %s %s\n", name, new_head_hash, state);
+        }
+
+        strcat(tmp, line);
+    }
+
+    // reopen branches with write mode
+    fclose(branches);
+    branches = fopen(branches_path, "w");
+
+    fprintf(branches, "%s", tmp);
+
+    fclose(branches);
+    free(branches_path);
+    return 0;
+}
+
+int change_head_of_curr_branch(char *new_head_hash)
+{
+    char *branches_path = get_branches_path();
+    FILE *branches = fopen(branches_path, "r");
+    if (branches == NULL)
+    {
+        perror("[ERROR] can not find the branches file.");
+        return -1;
+    }
+    free(branches_path);
+
+    char line[10000], name[100], head[1000], state[100];
+    while (fgets(line, sizeof line, branches))
+    {
+        sscanf(line, "%s %s %s", name, head, state);
+
+        if (!strcmp(state, "curr"))
+        {
+            fclose(branches);
+            return change_head_of_branch(name, new_head_hash);
+        }
+    }
+
+    fclose(branches);
+    printf("[ERROR] can not find the curr branch.");
+    return -1;
 }
 
 char *string_format(const char *format, ...)
@@ -1476,14 +1575,14 @@ int create_repo(int argc, char **argv)
     printf("[SUCC] author has set\n");
 
     // files
-    if (mkdir("./.zrb/files", 0777) == -1)
+    if (mkdir("./.zrb/repo", 0777) == -1)
     {
-        perror("[ERROR] mkdir .zrb/files");
+        perror("[ERROR] mkdir .zrb/repo");
         return -1;
     }
 
     // create a root commit:
-    FILE *root_commit = fopen("./.zrb/files/root.txt", "w");
+    FILE *root_commit = fopen("./.zrb/repo/root.txt", "w");
     fputs("commit\nroot\n", root_commit);
 
     fclose(root_commit);
