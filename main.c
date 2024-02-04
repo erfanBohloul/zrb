@@ -66,9 +66,6 @@ char *get_author_email_from_this_commit(FILE *commit);
 char *get_time_from_this_commit(FILE *commit);
 char *get_message_from_this_commit(FILE *commit);
 char *get_latest_commit();
-int is_hashFile_a_file(FILE *hash_file);
-int is_hashFile_a_folder(FILE *hash_file);
-int is_hashFile_a_commit(FILE *hash_file);
 char *get_hash_of_file_from_hash_file(FILE *file, char *name);
 // int completing_stage();
 // int completing_stage_in_depth(FILE *commited_file, FILE *file);
@@ -88,6 +85,7 @@ char *get_curr_branch();
 FILE *get_branches_file(char *mode);
 int change_head_of_curr_branch(char *new_head_hash);
 int change_head_of_branch(char *branch_name, char *new_head_hash);
+void flush_branches();
 
 int main(int argc, char **argv)
 {
@@ -188,12 +186,33 @@ func_ptr input_finder(int argc, char **argv)
     return NULL;
 }
 
+void flush_branches()
+{
+    char *branches_path = get_branches_path();
+    FILE *branches = fopen(branches_path, "r");
+
+    char line[10000];
+    while (fgets(line, sizeof line, branches))
+    {
+        printf("%s", line);
+    }
+
+    fclose(branches);
+    free(branches_path);
+}
+
 int branch(int argc, char **argv)
 {
     if (argc == 2)
     {
         char *branch_name = argv[1];
         return create_branch(branch_name);
+    }
+
+    else if (argc == 1)
+    {
+        flush_branches();
+        return 0;
     }
 
     Invalid_Command();
