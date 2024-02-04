@@ -66,6 +66,12 @@ char *get_author_email_from_this_commit(FILE *commit);
 char *get_time_from_this_commit(FILE *commit);
 char *get_message_from_this_commit(FILE *commit);
 char *get_latest_commit();
+int is_hashFile_a_file(FILE *hash_file);
+int is_hashFile_a_folder(FILE *hash_file);
+int is_hashFile_a_commit(FILE *hash_file);
+char *get_hash_of_file_from_hash_file(FILE *file, char *name);
+int completing_stage();
+int completing_stage_in_depth(FILE *commited_file, FILE *file);
 
 // set
 int set(int argc, char **argv);
@@ -958,6 +964,131 @@ int is_stage_empty()
     return flag;
 }
 
+int completing_stage(FILE *file)
+{
+    char *proj_path = get_proj_path(),
+         *latest_commit = get_latest_commit();
+
+    if (is_stage_empty())
+        return 0;
+
+    char *latest_commit_path = string_format("%s/.zrb/repo/%s.txt", proj_path, latest_commit);
+
+    FILE *fp = fopen(latest_commit_path, "a+");
+    if (fp == NULL)
+    {
+        perror("[ERROR] Failed to open latest commit file");
+        return -1;
+    }
+
+    return completing_stage_in_depth(fp, file);
+}
+
+char *get_hash_of_file_from_hash_file(FILE *file, char *name)
+{
+    rewind(file);
+    char line[10000], hash[10000], name_[10000];
+    while (fgets(line, sizeof line, file))
+    {
+        sscanf(line, "%s %s\n", hash, name_);
+        if (!strcmp(name_, name))
+            return strdup(hash);
+    }
+
+    return NULL;
+}
+
+int is_hashFile_a_file(FILE *hash_file)
+{
+    char line[1000];
+    rewind(hash_file);
+    fgets(line, sizeof line, hash_file);
+    return !strcmp(line, "file\n");
+}
+int is_hashFile_a_folder(FILE *hash_file)
+{
+    char line[1000];
+    rewind(hash_file);
+    fgets(line, sizeof line, hash_file);
+    return !strcmp(line, "folder\n");
+}
+int is_hashFile_a_commit(FILE *hash_file)
+{
+    char line[1000];
+    rewind(hash_file);
+    fgets(line, sizeof line, hash_file);
+    return !strcmp(line, "commit\n");
+}
+
+int completing_stage_in_depth(FILE *commited_file, FILE *file)
+{
+    // this two files should be opened in a+ mode
+
+    char *command = NULL,
+         *proj_path = get_proj_path();
+
+    // if the hash file is a file we don't wnat to explore it
+    if (is_hashFile_a_file(file))
+        return 0;
+
+    rewind(file);
+    rewind(commited_file);
+    char line[10000];
+
+    if (is_hashFile_a_commit(commited_file))
+    {
+        for (int i = 0; i < 7; i++)
+            fgets(line, sizeof line, commited_file);
+    }
+    else
+        // skip the first line
+        fgets(line, sizeof line, commited_file);
+
+    // go throw each line of commited file
+    char hash[10000], name[10000];
+    while (fgets(line, sizeof line, commited_file))
+    {
+        sscanf(line, "%s %s", hash, name);
+        if (!strcmp(name, ".") || !strcmp(name, ".."))
+            continue;
+        debug_s(name);
+
+        char *hash_tmp = get_hash_of_file_from_hash_file(file, name);
+        if (hash_tmp == NULL)
+        {
+            // this sub (folder/file) doesn't exists so we should add it to "file"
+            fprintf(file, "%s", line);
+        }
+        debug_s(hash_tmp);
+
+        char *hash_path = string_format("%s/.zrb/repo/%s.txt", proj_path, hash),
+             *hash_tmp_path = string_format("%s/.zrb/repo/%s.txt", proj_path, hash);
+
+        FILE *sub_file = fopen(hash_path, "a+"),
+             *sub_tmp_file = fopen(hash_tmp_path, "a+");
+
+        completing_stage_in_depth(sub_file, sub_tmp_file);
+
+        // now we should again get hash of the tmp_file and rename it
+        char *sha = sha_hash(hash_tmp_path),
+             *new_hash_tmp_path = string_format("%s/.zrb/repo/%s.txt", proj_path, sha);
+        command = string_format("mv %s %s", hash_tmp_path, new_hash_tmp_path);
+        system(command);
+
+        free(command);
+        free(new_hash_tmp_path);
+        free(sha);
+        fclose(sub_file);
+        fclose(sub_tmp_file);
+        free(hash_path);
+        free(hash_tmp_path);
+    }
+
+    free(command);
+    free(proj_path);
+    return 0;
+}
+
 int commit(char *message)
 {
     /*
@@ -997,7 +1128,9 @@ int commit(char *message)
         return -1;
     }
 
-    // it is valid
+    // completing stage area
+    // completing_stage();
+
     char *proj_path = get_proj_path();
     char *stage_path = get_stage_path();
 
@@ -1047,6 +1180,8 @@ int commit(char *message)
     copy_file(commit_file, tmp);
 
     fclose(tmp);
+
+    completing_stage(commit_file);
 
     // delete commit-file
     char *command = string_format("rm %s", commit_path);
