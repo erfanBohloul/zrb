@@ -70,8 +70,8 @@ int is_hashFile_a_file(FILE *hash_file);
 int is_hashFile_a_folder(FILE *hash_file);
 int is_hashFile_a_commit(FILE *hash_file);
 char *get_hash_of_file_from_hash_file(FILE *file, char *name);
-int completing_stage();
-int completing_stage_in_depth(FILE *commited_file, FILE *file);
+// int completing_stage();
+// int completing_stage_in_depth(FILE *commited_file, FILE *file);
 
 // set
 int set(int argc, char **argv);
@@ -597,7 +597,7 @@ int add_file_to_repo_files(FILE *file, char *file_name, char *repo_path, FILE *c
     free(command);
 
     // add this hash to parent-commit folder as an hash
-    command = string_format("%s.txt %s\n", sha, file_name);
+    command = string_format("%s %s\n", sha, file_name);
     // printf("saved in commit: %s\n", command);
     fputs(command, commit_file);
     free(command);
@@ -713,12 +713,12 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path)
 
     free(command);
     free(repo_folder_path);
-    free(sha);
+    free(sha_file);
     free(repo_file_path);
     free(sha_file_path);
     fclose(sub_commit_file);
 
-    return sha_file;
+    return sha;
 }
 
 char *get_author_name()
@@ -964,26 +964,6 @@ int is_stage_empty()
     return flag;
 }
 
-int completing_stage(FILE *file)
-{
-    char *proj_path = get_proj_path(),
-         *latest_commit = get_latest_commit();
-
-    if (is_stage_empty())
-        return 0;
-
-    char *latest_commit_path = string_format("%s/.zrb/repo/%s.txt", proj_path, latest_commit);
-
-    FILE *fp = fopen(latest_commit_path, "a+");
-    if (fp == NULL)
-    {
-        perror("[ERROR] Failed to open latest commit file");
-        return -1;
-    }
-
-    return completing_stage_in_depth(fp, file);
-}
-
 char *get_hash_of_file_from_hash_file(FILE *file, char *name)
 {
     rewind(file);
@@ -998,94 +978,155 @@ char *get_hash_of_file_from_hash_file(FILE *file, char *name)
     return NULL;
 }
 
-int is_hashFile_a_file(FILE *hash_file)
+int get_type_of_hash_file(FILE *hash_file)
 {
-    char line[1000];
     rewind(hash_file);
-    fgets(line, sizeof line, hash_file);
-    return !strcmp(line, "file\n");
-}
-int is_hashFile_a_folder(FILE *hash_file)
-{
-    char line[1000];
-    rewind(hash_file);
-    fgets(line, sizeof line, hash_file);
-    return !strcmp(line, "folder\n");
-}
-int is_hashFile_a_commit(FILE *hash_file)
-{
-    char line[1000];
-    rewind(hash_file);
-    fgets(line, sizeof line, hash_file);
-    return !strcmp(line, "commit\n");
-}
-
-int completing_stage_in_depth(FILE *commited_file, FILE *file)
-{
-    // this two files should be opened in a+ mode
-
-    char *command = NULL,
-         *proj_path = get_proj_path();
-
-    // if the hash file is a file we don't wnat to explore it
-    if (is_hashFile_a_file(file))
-        return 0;
-
-    rewind(file);
-    rewind(commited_file);
     char line[10000];
+    fgets(line, sizeof line, hash_file);
 
-    if (is_hashFile_a_commit(commited_file))
-    {
-        for (int i = 0; i < 7; i++)
-            fgets(line, sizeof line, commited_file);
-    }
+    /*
+        0 -> commit
+        1 -> folder
+        2 -> file
+        -1 -> undef
+    */
+    int res = -1;
+    if (!strcmp(line, "commit\n"))
+        res = 0;
+    else if (!strcmp(line, "folder\n"))
+        res = 1;
+    else if (!strcmp(line, "file\n"))
+        res = 2;
     else
-        // skip the first line
-        fgets(line, sizeof line, commited_file);
-
-    // go throw each line of commited file
-    char hash[10000], name[10000];
-    while (fgets(line, sizeof line, commited_file))
     {
-        sscanf(line, "%s %s", hash, name);
-        if (!strcmp(name, ".") || !strcmp(name, ".."))
-            continue;
-        debug_s(name);
-
-        char *hash_tmp = get_hash_of_file_from_hash_file(file, name);
-        if (hash_tmp == NULL)
-        {
-            // this sub (folder/file) doesn't exists so we should add it to "file"
-            fprintf(file, "%s", line);
-        }
-        debug_s(hash_tmp);
-
-        char *hash_path = string_format("%s/.zrb/repo/%s.txt", proj_path, hash),
-             *hash_tmp_path = string_format("%s/.zrb/repo/%s.txt", proj_path, hash);
-
-        FILE *sub_file = fopen(hash_path, "a+"),
-             *sub_tmp_file = fopen(hash_tmp_path, "a+");
-
-        completing_stage_in_depth(sub_file, sub_tmp_file);
-
-        // now we should again get hash of the tmp_file and rename it
-        char *sha = sha_hash(hash_tmp_path),
-             *new_hash_tmp_path = string_format("%s/.zrb/repo/%s.txt", proj_path, sha);
-        command = string_format("mv %s %s", hash_tmp_path, new_hash_tmp_path);
-        system(command);
-
-        free(command);
-        free(new_hash_tmp_path);
-        free(sha);
-        fclose(sub_file);
-        fclose(sub_tmp_file);
-        free(hash_path);
-        free(hash_tmp_path);
+        printf("[ERROR] can not detect the type of file\n");
     }
 
-    free(command);
-    free(proj_path);
+    rewind(hash_file);
+    return res;
+}
+
+void reach_the_content_of_hash_file(FILE *hash_file)
+{
+    rewind(hash_file);
+    int type = get_type_of_hash_file(hash_file);
+
+    int i = 0;
+    if (type == 0)
+        i = 7;
+    else if (type == 1)
+        i = 1;
+    else if (type == 2)
+        i = 1;
+
+    char line[10000];
+    for (int j = 0; j < i; j++)
+        fgets(line, sizeof line, hash_file);
+}
+
+int checkout_into_stage(char *dir_path, char *commit_hash)
+{
+    char *stage_path = get_stage_path(),
+         *file_repo_path = get_file_repo_path(),
+         *command = NULL;
+    // get the file of commit
+    char *commit_path = string_format("%s/%s.txt", file_repo_path, commit_hash);
+    debug_s(commit_path);
+    FILE *commit = fopen(commit_path, "r");
+    if (commit == NULL)
+    {
+        perror("[ERROR] can not find the commited file in checkout_into_stage");
+        return -1;
+    }
+
+    // checkouting
+    reach_the_content_of_hash_file(commit);
+
+    char line[100000], sub_hash[10000], sub_name[1000];
+    struct dirent *d;
+    DIR *dir;
+    while (fgets(line, sizeof line, commit))
+    {
+        sscanf(line, "%s %s", sub_hash, sub_name);
+        debug_s(sub_name);
+        if (sub_name[strlen(sub_name) - 1] == '\n')
+            sub_name[strlen(sub_name) - 1] = '\0';
+
+        // search the directory
+        dir = opendir(dir_path);
+        if (dir == NULL)
+        {
+            perror("[ERROR] open the directory failed in checkout_into_stage.");
+            return -1;
+        }
+
+        int flag = 0;
+        while ((d = readdir(dir)) != NULL)
+        {
+            if (!strcmp(d->d_name, sub_name))
+            {
+                flag = 1;
+                break;
+            }
+        }
+
+        // get the file of sub_file
+        command = string_format("%s/%s.txt", file_repo_path, sub_hash);
+        FILE *sub_file = fopen(command, "r");
+        if (sub_file == NULL)
+        {
+            perror("[ERROR] can not find the commited sub_file in checkout_into_stage");
+            return -1;
+        }
+        int type = get_type_of_hash_file(sub_file);
+        // debug(type);
+        // debug(flag);
+
+        if (type == 1)
+        {
+            // directory
+            char *sub_dir_path = string_format("%s/%s", dir_path, sub_name);
+
+            if (!flag)
+            {
+                mkdir(sub_dir_path, 0777);
+            }
+            // got deep
+            checkout_into_stage(sub_dir_path, sub_hash);
+
+            free(sub_dir_path);
+        }
+
+        else if (type == 2 && !flag)
+        {
+            // file
+
+            // create the file
+            command = string_format("%s/%s", dir_path, sub_name);
+            FILE *tmp_file = fopen(command, "w");
+            reach_the_content_of_hash_file(sub_file);
+            copy_file(sub_file, tmp_file);
+
+            fclose(tmp_file);
+            free(command);
+        }
+
+        else if (type == 0 || type == -1)
+        {
+            Undefined_Behaviour();
+            return -1;
+        }
+
+        fclose(sub_file);
+        // free(command);
+    }
+
+    fclose(commit);
+    free(commit_path);
+    free(stage_path);
+    free(file_repo_path);
+    // free(command);
+    printf("[SUCC] completing stage\n");
     return 0;
 }
 
@@ -1128,11 +1169,14 @@ int commit(char *message)
         return -1;
     }
 
-    // completing stage area
-    // completing_stage();
-
     char *proj_path = get_proj_path();
     char *stage_path = get_stage_path();
+
+    // completing stage area
+    char *latest_commit_hash = get_latest_commit();
+    char *path_to_commit = string_format("%s/.zrb/repo/%s.txt", proj_path, latest_commit_hash);
+    FILE *latest_commit = fopen(path_to_commit, "r");
+    checkout_into_stage(stage_path, latest_commit_hash);
 
     if (is_stage_empty())
     {
@@ -1159,7 +1203,7 @@ int commit(char *message)
         return -1;
     }
 
-    char *commit_path = string_format("%s/%s", files_repo_path, hash_commit);
+    char *commit_path = string_format("%s/%s.txt", files_repo_path, hash_commit);
     FILE *commit_file = fopen(commit_path, "r+");
     if (commit_file == NULL)
     {
@@ -1181,7 +1225,7 @@ int commit(char *message)
 
     fclose(tmp);
 
-    completing_stage(commit_file);
+    // completing_stage(commit_file);
 
     // delete commit-file
     char *command = string_format("rm %s", commit_path);
