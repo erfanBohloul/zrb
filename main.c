@@ -67,8 +67,8 @@ char *get_time_from_this_commit(FILE *commit);
 char *get_message_from_this_commit(FILE *commit);
 char *get_latest_commit();
 char *get_hash_of_file_from_hash_file(FILE *file, char *name);
-// int completing_stage();
-// int completing_stage_in_depth(FILE *commited_file, FILE *file);
+int get_type_of_hash_file(FILE *hash_file);
+void reach_the_content_of_hash_file(FILE *hash_file);
 
 // set
 int set(int argc, char **argv);
@@ -85,7 +85,17 @@ char *get_curr_branch();
 FILE *get_branches_file(char *mode);
 int change_head_of_curr_branch(char *new_head_hash);
 int change_head_of_branch(char *branch_name, char *new_head_hash);
+int change_curr_branch(char *new_curr_branch_name);
 void flush_branches();
+
+// checkout
+int checkout(int argc, char **argv);
+int checkout_in_depth(char *dir_path, char *commit_hash);
+
+// HEAD
+char *get_HEAD_hash();
+char *get_HEAD_path();
+FILE *get_HEAD_file(char *mod);
 
 int main(int argc, char **argv)
 {
@@ -180,10 +190,251 @@ func_ptr input_finder(int argc, char **argv)
         return &branch;
     }
 
+    if (!strcmp(command, "checkout"))
+    {
+        return &checkout;
+    }
+
     // else:
     Invalid_Command();
 
     return NULL;
+}
+
+char *get_HEAD_path()
+{
+    char *proj_path = get_proj_path();
+    char *res = string_format("%s/.zrb/HEAD.txt", proj_path);
+
+    free(proj_path);
+    return res;
+}
+
+FILE *get_HEAD_file(char *mod)
+{
+    char *HEAD_path = get_HEAD_path();
+    FILE *f = fopen(HEAD_path, mod);
+    if (f == NULL)
+    {
+        perror("[ERROR] can not find the HEAD file");
+    }
+
+    free(HEAD_path);
+    return f;
+}
+
+char *get_HEAD_hash()
+{
+    FILE *HEAD = get_HEAD_file("r");
+    if (HEAD == NULL)
+        return NULL;
+    char line[1000];
+    fgets(line, sizeof line, HEAD);
+    if (line[strlen(line) - 1] == '\n')
+        line[strlen(line) - 1] = '\0';
+
+    return strdup(line);
+}
+
+int checkout_in_depth(char *dir_path, char *commit_hash)
+{
+    char *stage_path = get_stage_path(),
+         *file_repo_path = get_file_repo_path(),
+         *command = NULL;
+    // get the file of commit
+    char *commit_path = string_format("%s/%s.txt", file_repo_path, commit_hash);
+    debug_s(commit_path);
+    FILE *commit = fopen(commit_path, "r");
+    if (commit == NULL)
+    {
+        perror("[ERROR] can not find the commited file in checkout_into_stage");
+        return -1;
+    }
+
+    // checkouting
+    reach_the_content_of_hash_file(commit);
+
+    char line[100000], sub_hash[10000], sub_name[1000];
+    struct dirent *d;
+    DIR *dir;
+    while (fgets(line, sizeof line, commit))
+    {
+        sscanf(line, "%s %s", sub_hash, sub_name);
+        // debug_s(sub_name);
+        if (sub_name[strlen(sub_name) - 1] == '\n')
+            sub_name[strlen(sub_name) - 1] = '\0';
+
+        // search the directory
+        dir = opendir(dir_path);
+        if (dir == NULL)
+        {
+            perror("[ERROR] open the directory failed in checkout_into_stage.");
+            return -1;
+        }
+
+        int flag = 0;
+        while ((d = readdir(dir)) != NULL)
+        {
+            if (!strcmp(d->d_name, sub_name))
+            {
+                flag = 1;
+                break;
+            }
+        }
+
+        // get the file of sub_file
+        command = string_format("%s/%s.txt", file_repo_path, sub_hash);
+        printf("command-str: %s\n", command);
+        FILE *sub_file = fopen(command, "r");
+        if (sub_file == NULL)
+        {
+            perror("[ERROR] can not find the commited sub_file in checkout_into_stage");
+            return -1;
+        }
+        int type = get_type_of_hash_file(sub_file);
+        // debug(type);
+        // debug(flag);
+
+        if (type == 1)
+        {
+            // directory
+            char *sub_dir_path = string_format("%s/%s", dir_path, sub_name);
+
+            if (!flag)
+            {
+                mkdir(sub_dir_path, 0777);
+            }
+            // got deep
+            checkout_in_depth(sub_dir_path, sub_hash);
+
+            free(sub_dir_path);
+        }
+
+        else if (type == 2)
+        {
+            // file
+
+            // open the file
+            command = string_format("%s/%s", dir_path, sub_name);
+            debug_s(command);
+            FILE *tmp_file = fopen(command, "w");
+            reach_the_content_of_hash_file(sub_file);
+            char t[1000];
+            fgets(t, sizeof t, sub_file);
+            debug_s(t);
+            reach_the_content_of_hash_file(sub_file);
+            copy_file(sub_file, tmp_file);
+
+            fclose(tmp_file);
+            free(command);
+        }
+
+        else if (type == 0 || type == -1)
+        {
+            Undefined_Behaviour();
+            return -1;
+        }
+
+        fclose(sub_file);
+        // free(command);
+    }
+
+    fclose(commit);
+    free(commit_path);
+    free(stage_path);
+    free(file_repo_path);
+    // free(command);
+    return 0;
+}
+
+int checkout(int argc, char **argv)
+{
+    if (argc != 2)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    // assume argv[1] is a branch name:
+    char *commit_id,
+        *file_repo_path = get_file_repo_path();
+    commit_id = get_head_commit_this_branch(argv[1]);
+    if (NULL == commit_id)
+    {
+        char *command = string_format("%s/%s.txt", file_repo_path, argv[1]);
+        FILE *f = fopen(command, "r");
+        if (f == NULL)
+        {
+            printf("[ERROR] %s does not exist.\n", command);
+            return -1;
+        }
+        fclose(f);
+        free(command);
+
+        commit_id = argv[1];
+    }
+
+    else
+    {
+        change_curr_branch(argv[1]);
+    }
+
+    char *proj_path = get_proj_path();
+    int res = checkout_in_depth(proj_path, commit_id);
+
+    FILE *HEAD = get_HEAD_file("w");
+    fprintf(HEAD, "%s", commit_id);
+    fclose(HEAD);
+
+    free(proj_path);
+    free(file_repo_path);
+    return res;
+}
+
+int change_curr_branch(char *new_curr_branch_name)
+{
+    char *old_curr_branch_name = get_curr_branch();
+    if (!strcmp(old_curr_branch_name, new_curr_branch_name))
+    {
+        printf("Already on '%s'\n", old_curr_branch_name);
+        return 0;
+    }
+
+    FILE *branches = get_branches_file("r");
+    char line[10000], name[1000], head[10000], state[1000], tmp[100000] = "";
+    while (fgets(line, sizeof line, branches))
+    {
+        sscanf(line, "%s %s %s", name, head, state);
+        if (state[strlen(state) - 1] == '\n')
+            state[strlen(state) - 1] = '\0';
+
+        if (!strcmp(name, new_curr_branch_name))
+        {
+            // found the branch we want to switch to
+            char *command = string_format("%s %s curr\n", name, head);
+            strcat(tmp, command);
+            free(command);
+        }
+
+        else if (!strcmp(state, "curr"))
+        {
+            char *command = string_format("%s %s\n", name, head);
+            strcat(tmp, command);
+            free(command);
+        }
+
+        else
+        {
+            strcat(tmp, line);
+        }
+    }
+
+    fclose(branches);
+    branches = get_branches_file("w");
+    fprintf(branches, "%s", tmp);
+
+    printf("[SUCC] the curr branch has changed\n");
+    return 0;
 }
 
 void flush_branches()
@@ -597,9 +848,8 @@ char *sha_hash(char *path_file)
     return strdup(hash);
 }
 
-int add_file_to_repo_files(FILE *file, char *file_name, char *repo_path, FILE *commit_file)
+int add_file_to_repo_files(char *file_name, char *repo_path, FILE *commit_file)
 {
-
     // hash file with sha algo
     char *sha = sha_hash(repo_path);
     if (sha == NULL)
@@ -663,6 +913,8 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path)
 
         char *sub_stage_path = string_format("%s/%s", stage_path, entry->d_name);
         char *sub_repo_path = string_format("%s-%s", repo_path, entry->d_name);
+        debug_s(sub_repo_path);
+        debug_s(sub_stage_path);
 
         if (entry->d_type == DT_DIR)
         {
@@ -682,28 +934,37 @@ char *commit_in_depth(DIR *folder, char *stage_path, char *repo_path)
         else
         {
             // its a file
-            FILE *file = fopen(sub_repo_path, "w+");
+            FILE *file = fopen(sub_repo_path, "w");
             if (file == NULL)
             {
                 perror("[ERROR] can not create a duplicate in file-repo");
                 continue;
             }
 
-            FILE *origin_file = fopen(sub_stage_path, "r+");
+            FILE *origin_file = fopen(sub_stage_path, "r");
             if (origin_file == NULL)
             {
                 perror("[ERROR] can not open the origin file from stage area");
                 continue;
             }
 
+            FILE *gh = fopen(sub_stage_path, "r");
+            char content[10000];
+            while (fgets(content, sizeof content, gh))
+            {
+                debug_s(content);
+            }
+
             // add "file" key word to start of the duplicate file in file-repo folder
-            fputs("file\n", file);
+            // fputs("file\n", file);
+            fprintf(file, "file\n");
 
             // copy content of origin file in stage area into duplicate file in file-repo folder
             copy_file(origin_file, file);
-
+            fclose(file);
+            fclose(origin_file);
             // this function create a hash of dup file and then rename it with hash name
-            int res = add_file_to_repo_files(file, entry->d_name, sub_repo_path, sub_commit_file);
+            int res = add_file_to_repo_files(entry->d_name, sub_repo_path, sub_commit_file);
             if (res == -1)
             {
                 perror("[ERROR] can not commit file");
@@ -1175,6 +1436,15 @@ int commit(char *message)
         content
     */
 
+    char *HEAD_hash = get_HEAD_hash(),
+         *curr_branch = get_curr_branch(),
+         *curr_branch_head = get_head_commit_this_branch(curr_branch);
+    if (strcmp(HEAD_hash, curr_branch_head))
+    {
+        printf("[ERROR] can not commit not on elsewhere except on HEAD.\n");
+        return -1;
+    }
+
     // is message valid?
     if (strlen(message) > 72)
     {
@@ -1195,13 +1465,14 @@ int commit(char *message)
     char *latest_commit_hash = get_latest_commit();
     char *path_to_commit = string_format("%s/.zrb/repo/%s.txt", proj_path, latest_commit_hash);
     FILE *latest_commit = fopen(path_to_commit, "r");
-    checkout_into_stage(stage_path, latest_commit_hash);
 
     if (is_stage_empty())
     {
         printf("[ERROR] there is noting in stage area.\n");
         return -2;
     }
+
+    checkout_into_stage(stage_path, latest_commit_hash);
 
     DIR *folder = opendir(stage_path);
 
@@ -1264,6 +1535,11 @@ int commit(char *message)
 
     // change the head of the curr branch to this one
     change_head_of_curr_branch(hash);
+
+    // update HEAD
+    FILE *HEAD = get_HEAD_file("w");
+    fprintf(HEAD, "%s", hash);
+    fclose(HEAD);
 
     // print the message of succ
     printf("[SUCC] commited!\n");
@@ -1729,7 +2005,7 @@ int change_config(int argc, char **argv)
 
 void copy_file(FILE *src, FILE *dest)
 {
-    int ch;
+    char ch;
     while ((ch = fgetc(src)) != EOF)
     {
         fputc(ch, dest);
@@ -1831,6 +2107,16 @@ int create_repo(int argc, char **argv)
     fclose(branches);
     printf("[SUCC] branches.txt has created\n");
 
+    FILE *HEAD = fopen("./.zrb/HEAD.txt", "w");
+    if (!HEAD)
+    {
+        perror("[ERROR] fopen HEAD.txt");
+        return -1;
+    }
+    fprintf(HEAD, "root");
+    printf("[SUCC] HEAD.txt has created\n");
+
+    fclose(HEAD);
     return 0;
 }
 
