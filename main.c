@@ -69,6 +69,7 @@ char *get_latest_commit();
 char *get_hash_of_file_from_hash_file(FILE *file, char *name);
 int get_type_of_hash_file(FILE *hash_file);
 void reach_the_content_of_hash_file(FILE *hash_file);
+char *get_branch_from_this_commit(FILE *commit);
 
 // set
 int set(int argc, char **argv);
@@ -103,6 +104,11 @@ int reset(int argc, char **argv);
 // status
 int status(int argc, char **argv);
 int has_diffrences(FILE *i, FILE *j);
+
+// log
+int log_zrb(int argc, char **argv);
+int num_files_in_hash_file(char *file_hash);
+void flush_commited_info(FILE *file, char *hash);
 
 int main(int argc, char **argv)
 {
@@ -212,10 +218,227 @@ func_ptr input_finder(int argc, char **argv)
         return &status;
     }
 
+    if (!strcmp(command, "log"))
+    {
+        return &log_zrb;
+    }
+
     // else:
     Invalid_Command();
 
     return NULL;
+}
+
+int num_files_in_hash_file(char *file_hash)
+{
+    char *file_repo_path = get_file_repo_path();
+    char *hash_file_path = string_format("%s/%s.txt", file_repo_path, file_hash);
+    FILE *hash_file = fopen(hash_file_path, "r");
+    if (hash_file == NULL)
+    {
+        perror("[ERROR] can not open hash file in num_file_in_hash_file func");
+        return -1;
+    }
+
+    if (get_type_of_hash_file(hash_file) == 2)
+        return 1;
+
+    reach_the_content_of_hash_file(hash_file);
+    int res = 0;
+    char line[10000], hash[1000], name[1000];
+    while (fgets(line, sizeof line, hash_file))
+    {
+        sscanf(line, "%s %s", hash, name);
+
+        res += num_files_in_hash_file(hash);
+    }
+
+    return res;
+}
+
+void flush_commited_info(FILE *file, char *hash)
+{
+    char *time = get_time_from_this_commit(file),
+         *message = get_message_from_this_commit(file),
+         *author = get_author_name_from_this_commit(file),
+         *author_email = get_author_email_from_this_commit(file),
+         *branch = get_branch_from_this_commit(file);
+
+    int num_files = num_files_in_hash_file(hash);
+
+    printf("time:%smessage:%sauthor:%sauthor_email:%sbranch:%shash:%s\n\n", time, message, author, author_email, branch, hash);
+}
+
+void flush_commits(int num)
+{
+    char *file_repo_path = get_file_repo_path();
+    DIR *dir = opendir(file_repo_path);
+    struct dirent *d;
+    while ((d = readdir(dir)) != NULL && num != 0)
+    {
+        if (d->d_type == DT_DIR)
+            continue;
+
+        if (!strcmp(d->d_name, "root.txt"))
+            continue;
+
+        char *path = string_format("%s/%s", file_repo_path, d->d_name);
+        FILE *file = fopen(path, "r");
+        if (get_type_of_hash_file(file) != 0)
+            continue;
+
+        num--;
+        char *hash = strtok(d->d_name, ".");
+        flush_commited_info(file, hash);
+    }
+}
+
+void log_by_branch(char *branch_name)
+{
+    char *file_repo_path = get_file_repo_path();
+    DIR *dir = opendir(file_repo_path);
+    struct dirent *d;
+    while ((d = readdir(dir)) != NULL)
+    {
+        if (d->d_type == DT_DIR)
+            continue;
+
+        if (!strcmp(d->d_name, "root.txt"))
+            continue;
+
+        char *path = string_format("%s/%s", file_repo_path, d->d_name);
+        FILE *file = fopen(path, "r");
+        if (get_type_of_hash_file(file) != 0)
+            continue;
+
+        char *branch = get_branch_from_this_commit(file);
+        if (branch[strlen(branch) - 1] == '\n')
+            branch[strlen(branch) - 1] = '\0';
+        if (strcmp(branch, branch_name))
+            continue;
+
+        char *hash = strtok(d->d_name, ".");
+        flush_commited_info(file, hash);
+    }
+}
+
+void log_by_author(char *author_name)
+{
+    char *file_repo_path = get_file_repo_path();
+    DIR *dir = opendir(file_repo_path);
+    struct dirent *d;
+    while ((d = readdir(dir)) != NULL)
+    {
+        if (d->d_type == DT_DIR)
+            continue;
+
+        if (!strcmp(d->d_name, "root.txt"))
+            continue;
+
+        char *path = string_format("%s/%s", file_repo_path, d->d_name);
+        FILE *file = fopen(path, "r");
+        if (get_type_of_hash_file(file) != 0)
+            continue;
+
+        char *author = get_author_name_from_this_commit(file);
+        if (strcmp(author, author_name))
+            continue;
+
+        char *hash = strtok(d->d_name, ".");
+        flush_commited_info(file, hash);
+    }
+}
+
+void log_by_message(char **words, int num)
+{
+    char *file_repo_path = get_file_repo_path();
+    DIR *dir = opendir(file_repo_path);
+    struct dirent *d;
+    while ((d = readdir(dir)) != NULL)
+    {
+        if (d->d_type == DT_DIR)
+            continue;
+
+        if (!strcmp(d->d_name, "root.txt"))
+            continue;
+
+        char *path = string_format("%s/%s", file_repo_path, d->d_name);
+        FILE *file = fopen(path, "r");
+        if (get_type_of_hash_file(file) != 0)
+            continue;
+
+        int flag = 0;
+        char *message = get_message_from_this_commit(file);
+        for (int i = 0; i < num; i++)
+        {
+            if (strstr(message, words[i]))
+                flag |= 1;
+        }
+
+        if (!flag)
+            continue;
+
+        char *hash = strtok(d->d_name, ".");
+        flush_commited_info(file, hash);
+    }
+}
+
+int log_zrb(int argc, char **argv)
+{
+    if (argc == 1)
+    {
+        flush_commits(-1);
+        return 0;
+    }
+    if (!strcmp(argv[1], "-search"))
+    {
+        log_by_message(&argv[2], argc - 2);
+        return 0;
+    }
+
+    if (argc != 3)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    if (!strcmp(argv[1], "-n"))
+    {
+        int num;
+        sscanf(argv[2], "%d", &num);
+        debug(num);
+
+        flush_commits(num);
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "-branch"))
+    {
+        char *branch_name = argv[2];
+        if (get_head_commit_this_branch(branch_name) == NULL)
+        {
+            printf("[ERROR] this branch doesn't exists\n");
+            return -1;
+        }
+
+        log_by_branch(branch_name);
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "-author"))
+    {
+        char *author_name = argv[2];
+        log_by_author(author_name);
+        return 0;
+    }
+
+    else
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    return 0;
 }
 
 int have_staged(char *abs_path)
