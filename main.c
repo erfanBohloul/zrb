@@ -37,7 +37,7 @@ char *get_local_config_path();
 void copy_file(FILE *src, FILE *dest);
 char *string_format(const char *format, ...);
 char *sha_hash(char *path_file);
-void cd_proj();
+int has_changed_from_last_commit(char *absolute_file_path, FILE *file);
 char *get_proj_path();
 char *get_author_name();
 char *get_author_email();
@@ -99,6 +99,10 @@ FILE *get_HEAD_file(char *mod);
 
 // reset
 int reset(int argc, char **argv);
+
+// status
+int status(int argc, char **argv);
+int has_diffrences(FILE *i, FILE *j);
 
 int main(int argc, char **argv)
 {
@@ -203,10 +207,181 @@ func_ptr input_finder(int argc, char **argv)
         return &reset;
     }
 
+    if (!strcmp(command, "status"))
+    {
+        return &status;
+    }
+
     // else:
     Invalid_Command();
 
     return NULL;
+}
+
+int have_staged(char *abs_path)
+{
+    char *proj_path = get_proj_path();
+    char *stage_path = get_stage_path(),
+         *path = NULL;
+    path = string_format("%s/%s", stage_path, abs_path + strlen(proj_path) + 1);
+
+    FILE *tmp = fopen(path, "r");
+    int res = 1;
+    if (tmp == NULL)
+        res = 0;
+
+    fclose(tmp);
+    free(path);
+    free(stage_path);
+    free(proj_path);
+    return res;
+}
+
+int status_in_depth(char *abs_path, int fasele)
+{
+    int t = 0;
+
+    char *repo_path = get_repo_path();
+    DIR *dir = opendir(abs_path);
+    struct dirent *d;
+    while ((d = readdir(dir)) != NULL)
+    {
+
+        if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
+            continue;
+        char *abs_sub_path = string_format("%s/%s", abs_path, d->d_name);
+
+        FILE *file = fopen(abs_sub_path, "r");
+
+        if (!strcmp(repo_path, abs_sub_path))
+            continue;
+
+        int res = 0;
+        res = has_changed_from_last_commit(abs_sub_path, file);
+
+        abs_sub_path = string_format("%s/%s", abs_path, d->d_name);
+
+        if (d->d_type == DT_DIR)
+        {
+            res = status_in_depth(abs_sub_path, fasele + 1);
+        }
+
+        if (res != 0)
+            t = 1;
+
+        char type;
+        if (res == -1)
+            type = 'A';
+        else if (res == 1)
+            type = 'M';
+        else
+            type = 'x';
+
+        abs_sub_path = string_format("%s/%s", abs_path, d->d_name);
+        char staged = (have_staged(abs_sub_path)) ? '+' : '-';
+
+        printf("|");
+        for (int i = 0; i < fasele; i++)
+            printf("-");
+        printf("-%s %c%c\n", d->d_name, staged, type);
+    }
+
+    return t;
+}
+
+int status(int argc, char **argv)
+{
+    if (argc > 1)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    char *proj_path = get_proj_path();
+    status_in_depth(proj_path, 0);
+    return 0;
+}
+
+int has_diffrences(FILE *i, FILE *j)
+{
+    char c, p;
+    while (1)
+    {
+        c = fgetc(i);
+        p = fgetc(j);
+        if (c == EOF && p == EOF)
+            return 0; // both files are the same
+        if (c == p)
+            continue;
+        return 1; // different files
+    }
+
+    return 0;
+}
+
+int has_changed_from_last_commit(char *absolute_file_path, FILE *file)
+{
+    char *proj_path = get_proj_path();
+    char *abs_file_path = absolute_file_path + strlen(proj_path) + 1;
+
+    char *latest_commit = get_latest_commit();
+    char *latest_commit_path = string_format("%s/.zrb/repo/%s.txt", proj_path, latest_commit);
+    FILE *hash_file = fopen(latest_commit_path, "r");
+
+    char *tok = NULL,
+         line[10000], hash[100], name[100],
+         *pre_tok = NULL;
+    tok = strtok(abs_file_path, "/");
+    while (tok != NULL)
+    {
+        // check if tok exists in given hash_file
+        rewind(hash_file);
+        if (get_type_of_hash_file(hash_file) == 2)
+        {
+            pre_tok = tok;
+            tok = strtok(NULL, "/");
+            if (tok != NULL)
+                return -1;
+            break;
+        }
+
+        int found = 0;
+        rewind(hash_file);
+        reach_the_content_of_hash_file(hash_file);
+
+        while (fgets(line, sizeof line, hash_file))
+        {
+            sscanf(line, "%s %s", hash, name);
+            if (name[strlen(name) - 1] == '\n')
+                name[strlen(name) - 1] = '\0';
+
+            if (!strcmp(name, tok))
+            {
+                char *sub_hash_file_path = string_format("%s/.zrb/repo/%s.txt", proj_path, hash);
+                fclose(hash_file);
+                hash_file = fopen(sub_hash_file_path, "r");
+                found = 1;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            return -1; // doesn't exists at all
+        }
+
+        pre_tok = tok;
+        tok = strtok(NULL, "/");
+    }
+
+    rewind(hash_file);
+    if (get_type_of_hash_file(hash_file) == 2)
+    {
+        reach_the_content_of_hash_file(hash_file);
+        return has_diffrences(hash_file, file);
+    }
+
+    return 0;
 }
 
 int reset(int argc, char **argv)
