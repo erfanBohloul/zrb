@@ -347,6 +347,35 @@ int checkout_in_depth(char *dir_path, char *commit_hash)
     return 0;
 }
 
+char *get_pre_commit(char *hash, int num_back)
+{
+    if (num_back <= 0)
+        return hash;
+
+    if (!strcmp(hash, "root"))
+        return hash;
+
+    char *file_repo_path = get_file_repo_path(),
+         *commit_path = string_format("%s/%s.txt", file_repo_path, hash);
+
+    FILE *commit = fopen(commit_path, "r");
+    if (commit == NULL)
+    {
+        perror("[ERROR] can not open commit hash file in get_pre_commit func");
+        return NULL;
+    }
+
+    char *pre_hash = get_last_hash_commit_from_this_commit(commit);
+    free(commit_path);
+    free(file_repo_path);
+    fclose(commit);
+
+    num_back--;
+    char *tmp = get_pre_commit(pre_hash, num_back);
+
+    return tmp;
+}
+
 int checkout(int argc, char **argv)
 {
     if (argc != 2)
@@ -355,28 +384,55 @@ int checkout(int argc, char **argv)
         return -1;
     }
 
-    // assume argv[1] is a branch name:
     char *commit_id,
         *file_repo_path = get_file_repo_path();
-    commit_id = get_head_commit_this_branch(argv[1]);
-    if (NULL == commit_id)
-    {
-        char *command = string_format("%s/%s.txt", file_repo_path, argv[1]);
-        FILE *f = fopen(command, "r");
-        if (f == NULL)
-        {
-            printf("[ERROR] %s does not exist.\n", command);
-            return -1;
-        }
-        fclose(f);
-        free(command);
 
-        commit_id = argv[1];
+    if (!strcmp(argv[1], "HEAD"))
+    {
+        char *curr_branch = get_curr_branch();
+        commit_id = get_head_commit_this_branch(curr_branch);
+
+        free(curr_branch);
+    }
+
+    else if (strstr(argv[1], "HEAD"))
+    {
+        int back_num = 0;
+        sscanf(argv[1], "HEAD-%d", &back_num);
+
+        char *curr_branch = get_curr_branch(),
+             *curr_head_branch = get_head_commit_this_branch(curr_branch);
+        char *pre_hash = get_pre_commit(curr_head_branch, back_num);
+        commit_id = pre_hash;
+
+        free(curr_branch);
+        free(curr_head_branch);
     }
 
     else
     {
-        change_curr_branch(argv[1]);
+        // assume argv[1] is a branch name:
+        commit_id = get_head_commit_this_branch(argv[1]);
+
+        if (NULL == commit_id)
+        {
+            char *command = string_format("%s/%s.txt", file_repo_path, argv[1]);
+            FILE *f = fopen(command, "r");
+            if (f == NULL)
+            {
+                printf("[ERROR] %s does not exist.\n", command);
+                return -1;
+            }
+            fclose(f);
+            free(command);
+
+            commit_id = argv[1];
+        }
+
+        else
+        {
+            change_curr_branch(argv[1]);
+        }
     }
 
     char *proj_path = get_proj_path();
@@ -1101,6 +1157,9 @@ char *get_last_hash_commit_from_this_commit(FILE *commit)
     {
         fgets(line, sizeof line, commit);
     }
+
+    if (line[strlen(line) - 1] == '\n')
+        line[strlen(line) - 1] = '\0';
 
     return strdup(line);
 }
