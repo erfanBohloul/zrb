@@ -97,6 +97,9 @@ char *get_HEAD_hash();
 char *get_HEAD_path();
 FILE *get_HEAD_file(char *mod);
 
+// reset
+int reset(int argc, char **argv);
+
 int main(int argc, char **argv)
 {
     if (argc == 1)
@@ -195,10 +198,55 @@ func_ptr input_finder(int argc, char **argv)
         return &checkout;
     }
 
+    if (!strcmp(command, "reset"))
+    {
+        return &reset;
+    }
+
     // else:
     Invalid_Command();
 
     return NULL;
+}
+
+int reset(int argc, char **argv)
+{
+    if (argc < 2)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    int idx = 1;
+    if (!strcmp(argv[1], "-f"))
+        idx++;
+
+    char curr_dir_path[100000];
+    getcwd(curr_dir_path, sizeof(curr_dir_path));
+
+    char *proj_path = get_proj_path(),
+         *stage_path = get_stage_path();
+
+    for (; idx < argc; idx++)
+    {
+        char *target = argv[idx];
+
+        target = string_format("%s/%s", curr_dir_path, target);
+        target += strlen(proj_path) + 1;
+
+        char *stage_target_path = string_format("%s/%s", stage_path, target);
+        char *command = string_format("rm -r %s", stage_target_path);
+        int res = system(command);
+
+        if (res != -1)
+        {
+            printf("[SUCC] Unstaged file/directory '%s'\n", target);
+        }
+        else
+            printf("[ERROR] still staged file/dir '%s'\n", target);
+    }
+
+    return 0;
 }
 
 char *get_HEAD_path()
