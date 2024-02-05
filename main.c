@@ -92,11 +92,13 @@ void flush_branches();
 // checkout
 int checkout(int argc, char **argv);
 int checkout_in_depth(char *dir_path, char *commit_hash);
+int checkout_into_stage(char *dir_path, char *commit_hash);
 
 // HEAD
 char *get_HEAD_hash();
 char *get_HEAD_path();
 FILE *get_HEAD_file(char *mod);
+char *get_pre_commit(char *hash, int num_back);
 
 // reset
 int reset(int argc, char **argv);
@@ -117,6 +119,9 @@ char *get_message_of_tag(FILE *tag);
 char *get_commitid_of_tag(FILE *tag);
 char *get_author_email_of_tag(FILE *tag);
 char *get_author_of_tag(FILE *tag);
+
+// revert
+int revert(int argc, char **argv);
 
 int main(int argc, char **argv)
 {
@@ -236,10 +241,78 @@ func_ptr input_finder(int argc, char **argv)
         return &tag;
     }
 
+    if (!strcmp(command, "revert"))
+    {
+        return &revert;
+    }
+
     // else:
     Invalid_Command();
 
     return NULL;
+}
+
+int revert(int argc, char **argv)
+{
+    int commit_alowed = 1;
+    int HEAD_X = 0;
+    for (int i = 0; i < argc; i++)
+    {
+        if (!strcmp(argv[i], "-n"))
+            commit_alowed &= 0;
+    }
+
+    for (int i = 0; i < argc; i++)
+    {
+        if (strtok(argv[i], "HEAD"))
+        {
+            sscanf(argv[i], "HEAD-%d", &HEAD_X);
+        }
+    }
+
+    char *message = NULL,
+         *commit_id = NULL;
+    if (argc < 2)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    if (HEAD_X)
+    {
+        char *curr_hash = get_latest_commit();
+        commit_id = get_pre_commit(curr_hash, HEAD_X);
+    }
+
+    if (!strcmp(argv[1], "-e"))
+    {
+        message = argv[2];
+        if (commit_id == NULL)
+            commit_id = argv[3];
+    }
+
+    else if (commit_id == NULL)
+        commit_id = argv[argc - 1];
+
+    char *proj_path = get_proj_path();
+    checkout_in_depth(proj_path, commit_id);
+    if (commit_alowed)
+    {
+
+        char *stage_path = get_stage_path();
+        checkout_into_stage(stage_path, commit_id);
+
+        if (message == NULL)
+        {
+            FILE *commit_file = fopen(string_format("%s/../repo/%s", stage_path, commit_id), "r");
+            message = get_message_from_this_commit(commit_file);
+
+            fclose(commit_file);
+        }
+
+        commit(message);
+    }
+    return 0;
 }
 
 /*
