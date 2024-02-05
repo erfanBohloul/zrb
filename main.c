@@ -110,6 +110,14 @@ int log_zrb(int argc, char **argv);
 int num_files_in_hash_file(char *file_hash);
 void flush_commited_info(FILE *file, char *hash);
 
+// tag
+int tag(int argc, char **argv);
+char *get_name_of_tag(FILE *tag);
+char *get_message_of_tag(FILE *tag);
+char *get_commitid_of_tag(FILE *tag);
+char *get_author_email_of_tag(FILE *tag);
+char *get_author_of_tag(FILE *tag);
+
 int main(int argc, char **argv)
 {
     if (argc == 1)
@@ -223,10 +231,231 @@ func_ptr input_finder(int argc, char **argv)
         return &log_zrb;
     }
 
+    if (!strcmp(command, "tag"))
+    {
+        return &tag;
+    }
+
     // else:
     Invalid_Command();
 
     return NULL;
+}
+
+/*
+    stash:
+        stash
+        id
+        content
+
+    tag:
+        tag
+        message
+        commit_id
+        time
+        author
+        author_email
+        content
+
+*/
+
+char *get_message_of_tag(FILE *tag)
+{
+    rewind(tag);
+
+    char line[10000];
+    // travel to line 2
+    for (int i = 1; i <= 2; i++)
+    {
+        fgets(line, sizeof line, tag);
+    }
+
+    if (line[strlen(line) - 1] == '\n')
+        line[strlen(line) - 1] = '\0';
+
+    return strdup(line);
+}
+
+char *get_commitid_of_tag(FILE *tag)
+{
+    rewind(tag);
+
+    char line[10000];
+    // travel to line 3
+    for (int i = 1; i <= 3; i++)
+    {
+        fgets(line, sizeof line, tag);
+    }
+
+    if (line[strlen(line) - 1] == '\n')
+        line[strlen(line) - 1] = '\0';
+
+    return strdup(line);
+}
+
+char *get_time_of_tag(FILE *tag)
+{
+    rewind(tag);
+
+    char line[10000];
+    // travel to line 4
+    for (int i = 1; i <= 4; i++)
+    {
+        fgets(line, sizeof line, tag);
+    }
+
+    if (line[strlen(line) - 1] == '\n')
+        line[strlen(line) - 1] = '\0';
+
+    return strdup(line);
+}
+
+char *get_author_of_tag(FILE *tag)
+{
+    rewind(tag);
+
+    char line[10000];
+    // travel to line 5
+    for (int i = 1; i <= 5; i++)
+    {
+        fgets(line, sizeof line, tag);
+    }
+
+    if (line[strlen(line) - 1] == '\n')
+        line[strlen(line) - 1] = '\0';
+
+    return strdup(line);
+}
+
+char *get_author_email_of_tag(FILE *tag)
+{
+    rewind(tag);
+
+    char line[10000];
+    // travel to line 6
+    for (int i = 1; i <= 6; i++)
+    {
+        fgets(line, sizeof line, tag);
+    }
+
+    if (line[strlen(line) - 1] == '\n')
+        line[strlen(line) - 1] = '\0';
+
+    return strdup(line);
+}
+
+FILE *get_tag_by_name(char *name)
+{
+    char *file_repo_path = get_file_repo_path();
+
+    char *tag_path = string_format("%s/%s.txt", file_repo_path, name);
+    FILE *tag_file = fopen(tag_path, "r");
+
+    return tag_file;
+}
+
+void show_tag(char *tag_name)
+{
+    FILE *tag_file = get_tag_by_name(tag_name);
+    printf(
+        "Tag\nname: %s\ncommit-id: %s\nauthor: %s %s\ndate: %s\nmessage: %s\n",
+        tag_name, get_commitid_of_tag(tag_file), get_author_of_tag(tag_file),
+        get_author_email_of_tag(tag_file),
+        get_time_of_tag(tag_file),
+        get_message_of_tag(tag_file));
+}
+
+int tag(int argc, char **argv)
+{
+    if (argc == 3 && !strcmp(argv[1], "show"))
+    {
+        char *tag_name = argv[2];
+        show_tag(tag_name);
+        return 0;
+    }
+
+    char *tag_name, *message = NULL, *commit_hash = NULL;
+    if (argc < 3 || strcmp(argv[1], "-a"))
+    {
+        Invalid_Command();
+        return -1;
+    }
+    tag_name = argv[2];
+
+    if (argc >= 5 && !strcmp(argv[3], "-m"))
+    {
+        message = argv[4];
+    }
+
+    if (argc >= 7 && !strcmp(argv[5], "-c"))
+    {
+        message = argv[6];
+    }
+
+    int overwrite = 0;
+    if (!strcmp(argv[argc - 1], "-f"))
+        overwrite = 1;
+
+    char *file_repo_path = get_file_repo_path();
+
+    FILE *tag_file = get_tag_by_name(tag_name);
+    if (tag_file != NULL)
+    {
+
+        if (overwrite)
+        {
+            // delete the thag file
+            char *command = string_format("rm -r %s/%s.txt", file_repo_path, tag_name);
+            system(command);
+
+            tag_file = fopen(string_format("%s/%s.txt", file_repo_path, tag_name), "w+b");
+        }
+
+        else
+        {
+            printf("[ERROR] this name is  already used by another tag.\n");
+            free(file_repo_path);
+            return -1;
+        }
+    }
+
+    else
+    {
+
+        if (overwrite)
+        {
+            printf("[ERROR] this tag name doesn't exists before\n");
+            return -1;
+        }
+
+        else
+        {
+            tag_file = fopen(string_format("%s/%s.txt", file_repo_path, tag_name), "w+b");
+            if (!tag_file)
+            {
+                perror("[ERROR] couldn't  open or create the new tag file.");
+                return -1;
+            }
+        }
+    }
+
+    struct tm *timeinfo;
+    time_t curr;
+    time(&curr);
+    timeinfo = localtime(&curr);
+
+    if (commit_hash == NULL)
+    {
+        commit_hash = get_latest_commit();
+    }
+
+    char *author = get_author_name(),
+         *author_email = get_author_email();
+
+    char *content = string_format("tag\n%s\n%s\n%s%s\n%s", (message == NULL) ? "" : message, commit_hash, asctime(timeinfo), author, author_email);
+    fprintf(tag_file, "%s", content);
+
+    return 0;
 }
 
 int num_files_in_hash_file(char *file_hash)
@@ -1773,6 +2002,8 @@ int get_type_of_hash_file(FILE *hash_file)
         0 -> commit
         1 -> folder
         2 -> file
+        3 -> stash
+        4 -> tag
         -1 -> undef
     */
     int res = -1;
@@ -1782,6 +2013,10 @@ int get_type_of_hash_file(FILE *hash_file)
         res = 1;
     else if (!strcmp(line, "file\n"))
         res = 2;
+    else if (!strcmp(line, "stash\n"))
+        res = 3;
+    else if (!strcmp(line, "tag\n"))
+        res = 4;
     else
     {
         printf("[ERROR] can not detect the type of file\n");
