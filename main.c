@@ -124,6 +124,9 @@ char *get_author_of_tag(FILE *tag);
 // revert
 int revert(int argc, char **argv);
 
+// pre_commit
+int zrb_pre_commit(int argc, char **argv);
+
 int main(int argc, char **argv)
 {
     if (argc == 1)
@@ -252,10 +255,320 @@ func_ptr input_finder(int argc, char **argv)
         return &import_alias;
     }
 
+    if (!strcmp(command, "pre-commit"))
+    {
+        return &zrb_pre_commit;
+    }
+
     // else:
     Invalid_Command();
 
     return NULL;
+}
+
+FILE *get_HOOk_file(char *mod)
+{
+    char *proj_path = get_proj_path();
+    char *path = string_format("%s/.zrb/HOOK.txt", proj_path);
+    FILE *HOOK = fopen(path, mod);
+    free(proj_path);
+    free(path);
+
+    return HOOK;
+}
+
+int get_state_of_hook(char *hook_id)
+{
+    FILE *hook = get_HOOk_file("r");
+    char line[1000], name[1000];
+    int state;
+    while (fgets(line, sizeof line, hook))
+    {
+        sscanf(line, "%s %d", name, &state);
+
+        if (!strcmp(name, hook_id))
+        {
+            return state;
+        }
+    }
+
+    return -1;
+    fclose(hook);
+}
+
+void change_hook_state(char *hook_id, int new_state)
+{
+    FILE *hook = get_HOOk_file("r");
+    char line[10000], name[1000], tmp[10000] = "";
+    int state;
+    while (fgets(line, sizeof line, hook))
+    {
+        sscanf(line, "%s %d", name, &state);
+
+        if (!strcmp(name, hook_id))
+            sprintf(line, "%s %d\n", hook_id, new_state);
+
+        strcat(tmp, line);
+    }
+
+    fclose(hook);
+    hook = get_HOOk_file("w");
+    fprintf(hook, "%s", tmp);
+    fclose(hook);
+}
+
+int todo_check_hook(char *path)
+{
+    FILE *file = fopen(path, "r");
+    if (file == NULL)
+    {
+        perror("[ERROR] can not open file in todo-check-hook func");
+        return -1;
+    }
+    char line[10000];
+
+    int is_txt = strstr(path, ".txt") != NULL;
+
+    while (fgets(line, sizeof(line), file))
+    {
+        if (!strstr(line, "TODO"))
+            continue;
+
+        if (is_txt)
+            return 0;
+        if (strstr(line, "//"))
+            return 0;
+    }
+
+    fclose(file);
+    return 1;
+}
+
+int eof_blank_space(char *path)
+{
+    FILE *file = fopen(path, "r");
+
+    if (file == NULL)
+    {
+        perror("[ERROR] can not open file in eof-blank-space func");
+        return -1;
+    }
+
+    char line[10000], pre_line[10000];
+    while (fgets(line, sizeof line, file))
+    {
+        strcpy(pre_line, line);
+    }
+    if (pre_line[strlen(pre_line) - 1] == '\n')
+        pre_line[strlen(pre_line) - 1] = '\0';
+
+    fclose(file);
+    return pre_line[strlen(pre_line) - 1] == ' ';
+}
+
+int valid_format(char *path)
+{
+    if (strstr(path, ".c"))
+        return 1;
+    if (strstr(path, ".cpp"))
+        return 1;
+    if (strstr(path, ".txt"))
+        return 1;
+    if (strstr(path, ".java"))
+        return 1;
+    if (strstr(path, ".py"))
+        return 1;
+    if (strstr(path, ".html"))
+        return 1;
+    if (strstr(path, ".png"))
+        return 1;
+
+    return 0;
+}
+
+int character_limit_hook(char *path)
+{
+    FILE *file = fopen(path, "r");
+
+    if (file == NULL)
+    {
+        perror("[ERROR] can not open file in character-limit-hook func");
+        return -1;
+    }
+    char line[10000];
+    long n;
+    while (fgets(line, sizeof line, file))
+    {
+        n += strlen(line);
+    }
+
+    fclose(file);
+    return n <= 20000;
+}
+
+int pre_commit_in_depth(char *path)
+{
+    DIR *dir = opendir(path);
+    struct dirent *d;
+
+    int res = 1;
+
+    while ((d = readdir(dir)) != NULL)
+    {
+        if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
+            continue;
+
+        char *file_path = string_format("%s/%s", path, d->d_name);
+
+        if (d->d_type == DT_DIR)
+        {
+            pre_commit_in_depth(file_path);
+            continue;
+        }
+
+        printf("%s:\n", d->d_name);
+
+        // check for hooks:
+        FILE *hook = get_HOOk_file("r");
+        char line[10000], name[1000];
+        int state;
+
+        while (fgets(line, sizeof line, hook))
+        {
+            sscanf(line, "%s %d", name, &state);
+            // debug_s(name);
+            if (state == 0)
+                continue;
+
+            if (!strcmp("todo-check", name))
+            {
+                state = todo_check_hook(file_path);
+            }
+
+            else if (!strcmp("eof-blank-space", name))
+            {
+                state = eof_blank_space(file_path);
+            }
+
+            else if (!strcmp("format-check", name))
+            {
+                state = valid_format(file_path);
+            }
+
+            else if (!strcmp("character-limit", name))
+            {
+                state = character_limit_hook(file_path);
+            }
+
+            else
+            {
+                Undefined_Behaviour();
+                continue;
+            }
+
+            debug(state);
+
+            char *o;
+            if (state)
+                o = "Passed";
+            else
+                o = "Failed";
+
+            res &= state;
+            printf("%s.........................%s\n", name, o);
+        }
+    }
+
+    return res;
+}
+
+int zrb_pre_commit(int argc, char **argv)
+{
+    if (argc == 3 && !strcmp(argv[1], "hooks") && !strcmp(argv[2], "list"))
+    {
+        FILE *hook = get_HOOk_file("r");
+        printf("hooks list:\n");
+        char line[1000], name[1000];
+        int state;
+        while (fgets(line, sizeof line, hook))
+        {
+            sscanf(line, "%s %d", name, &state);
+            printf("%s\n", name);
+        }
+        printf("end of hooks list\n\n");
+        return 0;
+    }
+
+    if (argc == 3 && !strcmp(argv[1], "applied") && !strcmp(argv[2], "list"))
+    {
+        FILE *hook = get_HOOk_file("r");
+        printf("aplied hooks list:\n");
+        char line[1000], name[1000];
+        int state;
+        while (fgets(line, sizeof line, hook))
+        {
+            sscanf(line, "%s %d", name, &state);
+            if (state)
+                printf("%s\n", name);
+        }
+        printf("end of aplied hooks list\n\n");
+        return 0;
+    }
+
+    if (argc == 4 && !strcmp(argv[1], "add") && !strcmp(argv[2], "hook"))
+    {
+        char *hook_id = argv[3];
+
+        int state_ = get_state_of_hook(hook_id);
+        if (state_ == -1)
+        {
+            printf("[ERROR] this hook doesn't exist\n");
+            return -1;
+        }
+
+        if (state_ == 1)
+        {
+            printf("[ERROR] this hook is already aplied\n");
+            return -1;
+        }
+
+        change_hook_state(hook_id, 1);
+        printf("[SUCC] state of hook changed\n");
+        return 0;
+    }
+
+    if (argc == 4 && !strcmp(argv[1], "remove") && !strcmp(argv[2], "hook"))
+    {
+        char *hook_id = argv[3];
+
+        int state_ = get_state_of_hook(hook_id);
+        if (state_ == -1)
+        {
+            printf("[ERROR] this hook doesn't exist\n");
+            return -1;
+        }
+
+        if (state_ == 0)
+        {
+            printf("[ERROR] this hook is already abondend\n");
+            return -1;
+        }
+
+        change_hook_state(hook_id, 0);
+        printf("[SUCC] state of hook changed\n");
+        return 0;
+    }
+
+    if (argc == 1)
+    {
+        char *stage_path = get_stage_path();
+        int res = pre_commit_in_depth(stage_path);
+        free(stage_path);
+        return res;
+    }
+
+    Invalid_Command();
+    return -1;
 }
 
 int revert(int argc, char **argv)
@@ -2971,7 +3284,18 @@ int create_repo(int argc, char **argv)
     fprintf(HEAD, "root");
     printf("[SUCC] HEAD.txt has created\n");
 
+    FILE *HOOK = fopen("./.zrb/HOOK.txt", "w");
+    if (!HOOK)
+    {
+        perror("[ERROR] fopen HOOK.txt");
+        return -1;
+    }
+    fprintf(HOOK, "todo-check 0\neof-blank-space 0\nformat-check 0\ncharacter-limit 0");
+
+    printf("[SUCC] HOOK.txt has created\n");
+
     fclose(HEAD);
+    fclose(HOOK);
     return 0;
 }
 
