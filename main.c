@@ -25,6 +25,7 @@ int create_repo(int argc, char **argv);
 // alias
 char *search_alias(char *command);
 char **handle_alias(int *argc, char **command);
+int import_alias(int argc, char **argv);
 
 // add
 int add(int argc, char **argv);
@@ -244,6 +245,11 @@ func_ptr input_finder(int argc, char **argv)
     if (!strcmp(command, "revert"))
     {
         return &revert;
+    }
+
+    if (!strcmp(command, "alias"))
+    {
+        return &import_alias;
     }
 
     // else:
@@ -2496,11 +2502,16 @@ char *search_alias(char *command)
     {
 
         sscanf(str, "%s", key);
+
+        if (strcmp(key, "g"))
+            continue;
+
+        sscanf(str + 2, "%s", key);
         if (!strcmp(key, command))
         {
 
             // get val
-            val = strstr(str, ":") + 2;
+            val = str + 2 + strlen(key) + 1;
 
             if (val[strlen(val) - 1] == '\n')
                 val[strlen(val) - 1] = '\0';
@@ -2564,6 +2575,37 @@ char **handle_alias(int *argc, char **command)
         i--;
     }
     return argv;
+}
+
+int import_alias(int argc, char **argv)
+{
+    if (argc != 3)
+    {
+        Invalid_Command();
+        return -1;
+    }
+
+    FILE *alias = fopen(alias_path, "a");
+    if (!alias)
+    {
+        perror("[ERROR] can not open alias file in import_alias func");
+        return -1;
+    }
+
+    char *key = argv[1],
+         *val = argv[2];
+
+    char *tmp = search_alias(key);
+    if (tmp != NULL)
+    {
+        free(tmp);
+        printf("[ERROR] this key already exists!\n");
+        return -1;
+    }
+    free(tmp);
+    fprintf(alias, "g %s %s\n", key, val);
+    printf("[SUCC] key->%s, val->%s\n", key, val);
+    return 0;
 }
 
 int add_file_to_stage(char *absolute_path)
@@ -2730,7 +2772,7 @@ int change_config_file(FILE *conf_file, int argc, char **argv, int idx)
     // file must be in write mode
     if (conf_file == NULL)
     {
-        printf("Error opening config file\n");
+        perror("[ERROR] opening config file\n");
         return -1;
     }
 

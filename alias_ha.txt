@@ -1,3 +1,6 @@
 g k mahan jk
 g u kirolo kjk
 g p u k
+g key val
+g val val
+g arc add .
